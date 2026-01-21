@@ -143,7 +143,7 @@ class CollectionUploaderUI:
         # Botão para carregar Collections
         self.load_collections_btn = ft.ElevatedButton(
             "Carregar Collections",
-            icon="refresh",
+            icon=ft.Icon(ft.icons.REFRESH),
             on_click=self.load_collections,
             disabled=True
         )
@@ -177,7 +177,7 @@ class CollectionUploaderUI:
         # Botão para selecionar JSON
         self.json_picker_btn = ft.ElevatedButton(
             "Selecionar Arquivos JSON",
-            icon="insert_drive_file",
+            icon=ft.Icon(ft.icons.INSERT_DRIVE_FILE),
             on_click=self.pick_json_files
         )
         
@@ -191,7 +191,7 @@ class CollectionUploaderUI:
         # Botão para selecionar pasta de saída
         self.folder_picker_btn = ft.ElevatedButton(
             "Selecionar Pasta de Saída",
-            icon="folder_open",
+            icon=ft.Icon(ft.icons.FOLDER_OPEN),
             on_click=self.pick_output_folder
         )
         
@@ -222,7 +222,7 @@ class CollectionUploaderUI:
         # Botão para gerar MDs
         self.generate_md_btn = ft.ElevatedButton(
             "Gerar Arquivos MD",
-            icon="create_new_folder",
+            icon=ft.Icon(ft.icons.CREATE_NEW_FOLDER),
             on_click=self.generate_md_files,
             disabled=True,
             bgcolor="#1976D2",
@@ -232,7 +232,7 @@ class CollectionUploaderUI:
         # Botão para fazer upload
         self.upload_btn = ft.ElevatedButton(
             "Upload para Collection",
-            icon="cloud_upload",
+            icon=ft.Icon(ft.icons.CLOUD_UPLOAD),
             on_click=self.upload_to_collection,
             disabled=True,
             bgcolor="#388E3C",
@@ -283,8 +283,10 @@ class CollectionUploaderUI:
     
     def pick_json_files(self, e):
         """Abre file picker para selecionar arquivos JSON."""
-        file_picker = ft.FilePicker()
-        file_picker.on_result = self.on_json_files_selected
+        def handle_result(e):
+            self.on_json_files_selected(e)
+        
+        file_picker = ft.FilePicker(on_result=handle_result)
         self.page.overlay.append(file_picker)
         self.page.update()
         file_picker.pick_files(
@@ -292,7 +294,7 @@ class CollectionUploaderUI:
             allow_multiple=True,
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["json", "txt"]
-        )  # type: ignore
+        )
     
     def on_json_files_selected(self, e):
         """Callback quando arquivos JSON são selecionados."""
@@ -311,11 +313,13 @@ class CollectionUploaderUI:
     
     def pick_output_folder(self, e):
         """Abre folder picker para selecionar pasta de saída."""
-        folder_picker = ft.FilePicker()
-        folder_picker.on_result = self.on_output_folder_selected
+        def handle_result(e):
+            self.on_output_folder_selected(e)
+        
+        folder_picker = ft.FilePicker(on_result=handle_result)
         self.page.overlay.append(folder_picker)
         self.page.update()
-        folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")  # type: ignore
+        folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
     
     def on_output_folder_selected(self, e):
         """Callback quando pasta de saída é selecionada."""
