@@ -137,13 +137,13 @@ class CollectionUploaderV2UI:
             options=[ft.dropdown.Option(model) for model in self.available_models],
             value="grok-beta",
             width=300,
-            on_change=self.on_model_change
+            on_blur=self.on_model_change
         )
         
         # Botão para carregar Collections
         self.load_collections_btn = ft.ElevatedButton(
             "Carregar Collections",
-            icon=ft.icons.REFRESH_ROUNDED,
+            icon="refresh",
             on_click=self.load_collections,
             disabled=True
         )
@@ -154,7 +154,7 @@ class CollectionUploaderV2UI:
             hint_text="Selecione a collection",
             options=[],
             width=450,
-            on_change=self.on_collection_change,
+            on_blur=self.on_collection_change,
             disabled=True
         )
         
@@ -177,7 +177,7 @@ class CollectionUploaderV2UI:
         # Botão para selecionar JSON
         self.json_picker_btn = ft.ElevatedButton(
             "Selecionar Arquivos JSON",
-            icon=ft.icons.FILE_OPEN,
+            icon="insert_drive_file",
             on_click=self.pick_json_files
         )
         
@@ -191,7 +191,7 @@ class CollectionUploaderV2UI:
         # Botão para selecionar pasta de saída
         self.folder_picker_btn = ft.ElevatedButton(
             "Selecionar Pasta de Saída",
-            icon=ft.icons.FOLDER_OUTLINED,
+            icon="folder_open",
             on_click=self.pick_output_folder
         )
         
@@ -222,7 +222,7 @@ class CollectionUploaderV2UI:
         # Botão para gerar MDs
         self.generate_md_btn = ft.ElevatedButton(
             "Gerar Arquivos MD",
-            icon=ft.icons.CREATE_NEW_FOLDER,
+            icon="create_new_folder",
             on_click=self.generate_md_files,
             disabled=True,
             bgcolor="#1976D2",
@@ -232,7 +232,7 @@ class CollectionUploaderV2UI:
         # Botão para fazer upload
         self.upload_btn = ft.ElevatedButton(
             "Upload para Collection",
-            icon=ft.icons.CLOUD_UPLOAD_OUTLINED,
+            icon="cloud_upload",
             on_click=self.upload_to_collection,
             disabled=True,
             bgcolor="#388E3C",
@@ -283,7 +283,8 @@ class CollectionUploaderV2UI:
     
     def pick_json_files(self, e):
         """Abre file picker para selecionar arquivos JSON."""
-        file_picker = ft.FilePicker(on_result=self.on_json_files_selected)
+        file_picker = ft.FilePicker()
+        file_picker.on_result = self.on_json_files_selected
         self.page.overlay.append(file_picker)
         self.page.update()
         file_picker.pick_files(
@@ -291,7 +292,7 @@ class CollectionUploaderV2UI:
             allow_multiple=True,
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["json", "txt"]
-        )
+        )  # type: ignore
     
     def on_json_files_selected(self, e):
         """Callback quando arquivos JSON são selecionados."""
@@ -310,10 +311,11 @@ class CollectionUploaderV2UI:
     
     def pick_output_folder(self, e):
         """Abre folder picker para selecionar pasta de saída."""
-        folder_picker = ft.FilePicker(on_result=self.on_output_folder_selected)
+        folder_picker = ft.FilePicker()
+        folder_picker.on_result = self.on_output_folder_selected
         self.page.overlay.append(folder_picker)
         self.page.update()
-        folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
+        folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")  # type: ignore
     
     def on_output_folder_selected(self, e):
         """Callback quando pasta de saída é selecionada."""
