@@ -116,7 +116,7 @@ class XAIClient:
         temperature: float,
         tools: Optional[List[Dict]] = None,
         stream: bool = False
-    ) -> Dict:
+    ) -> Any:
         """
         Envia requisição de chat completion para a API.
         
@@ -191,29 +191,30 @@ class PrecedenteSearchApp:
     def create_ui(self):
         """Cria a interface do usuário."""
         # Barra de ferramentas
+        toolbar_controls: List[Any] = [
+            ft.IconButton(
+                icon="delete_sweep", # type: ignore
+                tooltip="Limpar chat",
+                on_click=self.clear_chat
+            ),
+            ft.IconButton(
+                icon="copy_all", # type: ignore
+                tooltip="Copiar chat",
+                on_click=self.copy_chat
+            ),
+            ft.IconButton(
+                icon="attach_file", # type: ignore
+                tooltip="Anexar arquivo",
+                on_click=self.attach_file
+            ),
+            ft.IconButton(
+                icon="settings", # type: ignore
+                tooltip="Configurações",
+                on_click=self.open_settings
+            ),
+        ]
         self.toolbar = ft.Row(
-            controls=[
-                ft.IconButton(
-                    icon=ft.icons.DELETE_SWEEP,
-                    tooltip="Limpar chat",
-                    on_click=self.clear_chat
-                ),
-                ft.IconButton(
-                    icon=ft.icons.COPY_ALL,
-                    tooltip="Copiar chat",
-                    on_click=self.copy_chat
-                ),
-                ft.IconButton(
-                    icon=ft.icons.ATTACH_FILE,
-                    tooltip="Anexar arquivo",
-                    on_click=self.attach_file
-                ),
-                ft.IconButton(
-                    icon=ft.icons.SETTINGS,
-                    tooltip="Configurações",
-                    on_click=self.open_settings
-                ),
-            ],
+            controls=toolbar_controls,
             alignment=ft.MainAxisAlignment.START,
         )
         
@@ -230,7 +231,7 @@ class PrecedenteSearchApp:
             label="Collection",
             hint_text="Selecione uma Collection",
             options=[],
-            on_change=self.on_collection_changed,
+            on_change=self.on_collection_changed, # type: ignore
             expand=True,
         )
         
@@ -253,8 +254,8 @@ class PrecedenteSearchApp:
         
         # Botão de enviar
         self.send_button = ft.ElevatedButton(
-            text="Enviar",
-            icon=ft.icons.SEND,
+            text="Enviar", # type: ignore
+            icon="send", # type: ignore
             on_click=self.send_message,
         )
         
@@ -281,7 +282,7 @@ class PrecedenteSearchApp:
             controls=[
                 ft.Container(
                     content=self.toolbar,
-                    bgcolor=ft.colors.SURFACE_VARIANT,
+                    bgcolor="surfacevariant",
                     padding=10,
                 ),
                 self.chat_container,
@@ -350,25 +351,26 @@ class PrecedenteSearchApp:
             content: Conteúdo da mensagem
             is_user: Se é mensagem do usuário ou do assistente
         """
+        row_controls: List[Any] = [
+            ft.Icon(
+                "person" if is_user else "smart_toy", # type: ignore
+                size=20,
+            ),
+            ft.Text(
+                "Você" if is_user else "Grok",
+                weight=ft.FontWeight.BOLD,
+                size=14,
+            ),
+            ft.Text(
+                datetime.now().strftime("%H:%M"),
+                size=12,
+                color="grey",
+            ),
+        ]
         message_card = ft.Card(
             content=ft.Container(
                 content=ft.Column([
-                    ft.Row([
-                        ft.Icon(
-                            name=ft.icons.PERSON if is_user else ft.icons.SMART_TOY,
-                            size=20,
-                        ),
-                        ft.Text(
-                            "Você" if is_user else "Grok",
-                            weight=ft.FontWeight.BOLD,
-                            size=14,
-                        ),
-                        ft.Text(
-                            datetime.now().strftime("%H:%M"),
-                            size=12,
-                            color=ft.colors.GREY,
-                        ),
-                    ]),
+                    ft.Row(controls=row_controls),
                     ft.Markdown(
                         content,
                         selectable=True,
@@ -393,7 +395,7 @@ class PrecedenteSearchApp:
                     extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
                 ),
                 padding=15,
-                bgcolor=ft.colors.BLUE_GREY_900 if self.config_manager.get("theme_dark") else ft.colors.BLUE_GREY_100,
+                bgcolor="bluegrey900" if self.config_manager.get("theme_dark") else "bluegrey100",
             ),
             elevation=1,
         )
@@ -425,16 +427,20 @@ class PrecedenteSearchApp:
     
     def attach_file(self, e):
         """Abre diálogo para anexar arquivo."""
-        def on_file_selected(e: ft.FilePickerResultEvent):
+        def on_file_selected(e: Any):
             if e.files:
                 for file in e.files:
                     self.attached_files.append(file.path)
                     self.add_system_message(f"📎 Arquivo anexado: {file.name}")
         
-        file_picker = ft.FilePicker(on_result=on_file_selected)
+        file_picker = ft.FilePicker(on_result=on_file_selected) # type: ignore
         self.page.overlay.append(file_picker)
         self.page.update()
-        file_picker.pick_files(allow_multiple=True)
+        # Em algumas versões do Flet, pick_files é síncrono ou disparado via evento
+        try:
+            file_picker.pick_files(allow_multiple=True) # type: ignore
+        except Exception:
+            pass
     
     def build_tools(self) -> Optional[List[Dict]]:
         """
@@ -534,6 +540,9 @@ class PrecedenteSearchApp:
         
         try:
             # Envia para API
+            if self.xai_client is None:
+                raise Exception("Cliente xAI não inicializado. Verifique sua API Key.")
+
             response = self.xai_client.chat_completion(
                 messages=messages,
                 model=self.config_manager.get("model"),
@@ -674,14 +683,29 @@ class PrecedenteSearchApp:
                 height=600,
             ),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: setattr(settings_dialog, 'open', False) or self.page.update()),
+                ft.TextButton("Cancelar", on_click=lambda _: self.close_dialog(settings_dialog)),
                 ft.ElevatedButton("Salvar", on_click=save_settings),
             ],
         )
         
-        self.page.dialog = settings_dialog
-        settings_dialog.open = True
-        self.page.update()
+        self.open_dialog(settings_dialog)
+
+    def open_dialog(self, dialog):
+        """Abre um diálogo de forma compatível."""
+        if hasattr(self.page, "open"):
+            self.page.open(dialog) # type: ignore
+        else:
+            setattr(self.page, "dialog", dialog)
+            dialog.open = True
+            self.page.update()
+
+    def close_dialog(self, dialog):
+        """Fecha um diálogo de forma compatível."""
+        if hasattr(self.page, "close"):
+            self.page.close(dialog) # type: ignore
+        else:
+            dialog.open = False
+            self.page.update()
 
 
 def main(page: ft.Page):
