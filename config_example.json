@@ -1,0 +1,22 @@
+{
+  "_comment": "Arquivo de configuração para CollectionUploaderV2.py",
+  "_instructions": "Substitua os valores abaixo pelas suas credenciais reais",
+  
+  "grok_api_key": "xai-YOUR_GROK_API_KEY_HERE",
+  "management_key": "xai-YOUR_MANAGEMENT_KEY_HERE",
+  "collection_id": "col_YOUR_COLLECTION_ID_HERE",
+  
+  "grok_model": "grok-beta",
+  "_grok_model_options": [
+    "grok-beta",
+    "grok-2-1212",
+    "grok-2-vision-1212"
+  ],
+  "_grok_model_note": "grok-beta é rápido e bom. grok-2-1212 é mais preciso mas mais lento.",
+  
+  "output_dir": "./sentencas_md_v2",
+  "_output_dir_note": "Diretório onde serão salvos os arquivos MD locais",
+  
+  "save_local_md": true,
+  "_save_local_md_note": "true = salva arquivos MD localmente (backup). false = só upload via API"
+}
