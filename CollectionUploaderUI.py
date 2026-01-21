@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CollectionUploaderUI.py
+CollectionUploaderUI.py - VERSÃO CORRIGIDA
 Interface gráfica Flet para o CollectionUploader.py
 Permite processar JSONs para MD e fazer upload para xAI Collections
 """
@@ -11,7 +11,7 @@ import os
 import re
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 import requests
 
@@ -24,8 +24,13 @@ class CollectionUploaderUI:
         self.page.title = "Collection Uploader - xAI"
         self.page.theme_mode = ft.ThemeMode.LIGHT
         self.page.padding = 20
-        self.page.window_width = 1000
-        self.page.window_height = 800
+        
+        # Configurar janela (versão Flet 0.80+)
+        try:
+            self.page.window.width = 1000
+            self.page.window.height = 800
+        except:
+            pass  # Fallback se window não estiver disponível
         
         # Estado da aplicação
         self.selected_json_files: List[str] = []
@@ -63,7 +68,7 @@ class CollectionUploaderUI:
             "Collection Uploader - xAI Collections",
             size=28,
             weight=ft.FontWeight.BOLD,
-            color=ft.colors.BLUE_700
+            color="#1976D2"
         )
         
         # Seção de Configuração
@@ -82,9 +87,9 @@ class CollectionUploaderUI:
             read_only=True,
             min_lines=10,
             max_lines=15,
-            bgcolor=ft.colors.GREY_900,
-            color=ft.colors.WHITE,
-            border_color=ft.colors.BLUE_400
+            bgcolor="#263238",
+            color="#FFFFFF",
+            border_color="#42A5F5"
         )
         
         # Layout principal
@@ -138,7 +143,7 @@ class CollectionUploaderUI:
         # Botão para carregar Collections
         self.load_collections_btn = ft.ElevatedButton(
             "Carregar Collections",
-            icon=ft.icons.REFRESH,
+            icon=ft.icons.REFRESH_ROUNDED,
             on_click=self.load_collections,
             disabled=True
         )
@@ -162,7 +167,7 @@ class CollectionUploaderUI:
                 ft.Row([self.model_dropdown], spacing=10),
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, ft.colors.BLUE_200),
+            border=ft.border.all(1, "#90CAF9"),
             border_radius=10
         )
     
@@ -180,13 +185,13 @@ class CollectionUploaderUI:
         self.json_files_list = ft.Text(
             "Nenhum arquivo selecionado",
             size=12,
-            color=ft.colors.GREY_700
+            color="#616161"
         )
         
         # Botão para selecionar pasta de saída
         self.folder_picker_btn = ft.ElevatedButton(
             "Selecionar Pasta de Saída",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.icons.FOLDER_OUTLINED,
             on_click=self.pick_output_folder
         )
         
@@ -194,7 +199,7 @@ class CollectionUploaderUI:
         self.output_folder_text = ft.Text(
             "Nenhuma pasta selecionada",
             size=12,
-            color=ft.colors.GREY_700
+            color="#616161"
         )
         
         return ft.Container(
@@ -207,7 +212,7 @@ class CollectionUploaderUI:
                 self.output_folder_text,
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, ft.colors.GREEN_200),
+            border=ft.border.all(1, "#A5D6A7"),
             border_radius=10
         )
     
@@ -217,25 +222,21 @@ class CollectionUploaderUI:
         # Botão para gerar MDs
         self.generate_md_btn = ft.ElevatedButton(
             "Gerar Arquivos MD",
-            icon=ft.icons.CREATE,
+            icon=ft.icons.CREATE_NEW_FOLDER,
             on_click=self.generate_md_files,
             disabled=True,
-            style=ft.ButtonStyle(
-                color=ft.colors.WHITE,
-                bgcolor=ft.colors.BLUE_700
-            )
+            bgcolor="#1976D2",
+            color="#FFFFFF"
         )
         
         # Botão para fazer upload
         self.upload_btn = ft.ElevatedButton(
             "Upload para Collection",
-            icon=ft.icons.CLOUD_UPLOAD,
+            icon=ft.icons.CLOUD_UPLOAD_OUTLINED,
             on_click=self.upload_to_collection,
             disabled=True,
-            style=ft.ButtonStyle(
-                color=ft.colors.WHITE,
-                bgcolor=ft.colors.GREEN_700
-            )
+            bgcolor="#388E3C",
+            color="#FFFFFF"
         )
         
         # Progress bar
@@ -254,7 +255,7 @@ class CollectionUploaderUI:
                 self.progress_bar
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, ft.colors.ORANGE_200),
+            border=ft.border.all(1, "#FFCC80"),
             border_radius=10
         )
     
@@ -288,21 +289,22 @@ class CollectionUploaderUI:
         file_picker.pick_files(
             dialog_title="Selecione os arquivos JSON",
             allow_multiple=True,
+            file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["json", "txt"]
         )
     
-    def on_json_files_selected(self, e: ft.FilePickerResultEvent):
+    def on_json_files_selected(self, e):
         """Callback quando arquivos JSON são selecionados."""
         if e.files:
             self.selected_json_files = [f.path for f in e.files]
             files_text = "\n".join([f"• {os.path.basename(path)}" for path in self.selected_json_files])
             self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
-            self.json_files_list.color = ft.colors.GREEN_700
+            self.json_files_list.color = "#388E3C"
             self.check_generate_button_state()
         else:
             self.selected_json_files = []
             self.json_files_list.value = "Nenhum arquivo selecionado"
-            self.json_files_list.color = ft.colors.GREY_700
+            self.json_files_list.color = "#616161"
         
         self.page.update()
     
@@ -313,17 +315,17 @@ class CollectionUploaderUI:
         self.page.update()
         folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
     
-    def on_output_folder_selected(self, e: ft.FilePickerResultEvent):
+    def on_output_folder_selected(self, e):
         """Callback quando pasta de saída é selecionada."""
         if e.path:
             self.output_directory = e.path
             self.output_folder_text.value = f"Pasta: {self.output_directory}"
-            self.output_folder_text.color = ft.colors.GREEN_700
+            self.output_folder_text.color = "#388E3C"
             self.check_generate_button_state()
         else:
             self.output_directory = ""
             self.output_folder_text.value = "Nenhuma pasta selecionada"
-            self.output_folder_text.color = ft.colors.GREY_700
+            self.output_folder_text.color = "#616161"
         
         self.page.update()
     
@@ -347,7 +349,7 @@ class CollectionUploaderUI:
         self.upload_btn.disabled = not can_upload
         self.page.update()
     
-    def log(self, message: str, color: str = "white"):
+    def log(self, message: str):
         """Adiciona mensagem ao log de feedback."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
