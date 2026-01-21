@@ -2,26 +2,15 @@
 """
 PrecedenteSearchApp.py
 Aplicação Flet para busca semântica de precedentes trabalhistas usando xAI Collections.
-
-Funcionalidades:
-- Interface gráfica para interação com modelo Grok
-- Busca híbrida em xAI Collections com filtros de metadados
-- Configurações persistentes (API keys, modelo, temperature)
-- Anexar arquivos ao contexto do chat
-- Copiar chat completo para clipboard
-- Suporte a busca em tempo real (Web e X)
-- Tema claro/escuro
-
-Uso:
-    python PrecedenteSearchApp.py
 """
 
 import flet as ft
 import json
 import requests
 import os
+import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, cast
 from datetime import datetime
 import pyperclip
 
@@ -37,9 +26,6 @@ class ConfigManager:
             "model": "grok-2-1212",
             "temperature": 0.7,
             "system_prompt": "Você é um assistente jurídico especializado em Direito do Trabalho brasileiro. Analise precedentes e fundamente respostas com base na CLT, jurisprudência e doutrina trabalhista.",
-            "realtime_web_search": False,
-            "realtime_x_search": False,
-            "url_citation": True,
             "theme_dark": True,
             "selected_collection_id": ""
         }
@@ -51,7 +37,6 @@ class ConfigManager:
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                    # Merge com defaults para garantir todas as chaves
                     return {**self.default_config, **loaded}
             except Exception as e:
                 print(f"Erro ao carregar config: {e}")
@@ -117,19 +102,7 @@ class XAIClient:
         tools: Optional[List[Dict]] = None,
         stream: bool = False
     ) -> Any:
-        """
-        Envia requisição de chat completion para a API.
-        
-        Args:
-            messages: Lista de mensagens do chat
-            model: Modelo a ser usado
-            temperature: Temperatura para geração
-            tools: Lista de ferramentas disponíveis
-            stream: Se deve usar streaming
-            
-        Returns:
-            Resposta da API
-        """
+        """Envia requisição de chat completion para a API."""
         payload = {
             "model": model,
             "messages": messages,
@@ -153,7 +126,7 @@ class XAIClient:
             response.raise_for_status()
             
             if stream:
-                return response  # Retorna objeto response para streaming
+                return response
             else:
                 return response.json()
         except Exception as e:
@@ -166,59 +139,54 @@ class PrecedenteSearchApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.config_manager = ConfigManager()
-        self.xai_client = None
-        self.messages = []  # Histórico de mensagens
-        self.attached_files = []  # Arquivos anexados
+        self.xai_client: Optional[XAIClient] = None
+        self.messages: List[Dict] = []
+        self.attached_files: List[str] = []
         
-        # Configuração da página
         self.page.title = "Busca de Precedentes Trabalhistas"
         self.page.theme_mode = ft.ThemeMode.DARK if self.config_manager.get("theme_dark") else ft.ThemeMode.LIGHT
         self.page.padding = 0
         
-        # Inicializa cliente xAI
         self.update_xai_client()
-        
-        # Cria interface
         self.create_ui()
     
     def update_xai_client(self):
-        """Atualiza o cliente xAI com as credenciais atuais."""
-        api_key = self.config_manager.get("api_key")
-        management_key = self.config_manager.get("management_key")
+        """Atualiza o cliente xAI."""
+        api_key = str(self.config_manager.get("api_key") or "")
+        management_key = str(self.config_manager.get("management_key") or "")
         if api_key:
             self.xai_client = XAIClient(api_key, management_key)
     
     def create_ui(self):
         """Cria a interface do usuário."""
-        # Barra de ferramentas
-        toolbar_controls: List[Any] = [
-            ft.IconButton(
-                icon="delete_sweep", # type: ignore
-                tooltip="Limpar chat",
-                on_click=self.clear_chat
-            ),
-            ft.IconButton(
-                icon="copy_all", # type: ignore
-                tooltip="Copiar chat",
-                on_click=self.copy_chat
-            ),
-            ft.IconButton(
-                icon="attach_file", # type: ignore
-                tooltip="Anexar arquivo",
-                on_click=self.attach_file
-            ),
-            ft.IconButton(
-                icon="settings", # type: ignore
-                tooltip="Configurações",
-                on_click=self.open_settings
-            ),
-        ]
+        # Toolbar
         self.toolbar = ft.Row(
-            controls=toolbar_controls,
+            controls=[
+                ft.IconButton(
+                    icon=cast(Any, "delete_sweep"),
+                    tooltip="Limpar chat",
+                    on_click=self.clear_chat
+                ),
+                ft.IconButton(
+                    icon=cast(Any, "copy_all"),
+                    tooltip="Copiar chat",
+                    on_click=self.copy_chat
+                ),
+                ft.IconButton(
+                    icon=cast(Any, "attach_file"),
+                    tooltip="Anexar arquivo",
+                    on_click=self.attach_file
+                ),
+                ft.IconButton(
+                    icon=cast(Any, "settings"),
+                    tooltip="Configurações",
+                    on_click=self.open_settings
+                ),
+            ],
             alignment=ft.MainAxisAlignment.START,
         )
         
-        # Área de mensagens (chat)
+        # Chat
         self.chat_container = ft.ListView(
             expand=True,
             spacing=10,
@@ -226,162 +194,99 @@ class PrecedenteSearchApp:
             auto_scroll=True,
         )
         
-        # Dropdown de Collections
+        # Collection selection
         self.collection_dropdown = ft.Dropdown(
             label="Collection",
             hint_text="Selecione uma Collection",
             options=[],
-            on_change=self.on_collection_changed, # type: ignore
+            on_blur=self.on_collection_changed,
             expand=True,
         )
         
-        # Toggle para habilitar busca na Collection
         self.collection_search_toggle = ft.Switch(
             label="Buscar na Collection",
             value=False,
-            on_change=self.on_collection_toggle_changed,
         )
         
-        # Campo de entrada de mensagem
+        # Input
         self.message_input = ft.TextField(
-            hint_text="Digite sua pergunta sobre precedentes trabalhistas...",
+            hint_text="Digite sua pergunta...",
             multiline=True,
             min_lines=2,
             max_lines=5,
             expand=True,
-            on_submit=self.send_message,
+            on_submit=self.send_message_click,
         )
         
-        # Botão de enviar
         self.send_button = ft.ElevatedButton(
-            text="Enviar", # type: ignore
-            icon="send", # type: ignore
-            on_click=self.send_message,
+            content=ft.Row([ft.Icon(icon=cast(Any, "send")), ft.Text("Enviar")], tight=True),
+            on_click=self.send_message_click,
         )
         
-        # Área de entrada
+        # Layouts
         input_area = ft.Row(
-            controls=[
-                self.message_input,
-                self.send_button,
-            ],
+            controls=[self.message_input, self.send_button],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
         
-        # Collection controls
         collection_controls = ft.Row(
-            controls=[
-                self.collection_dropdown,
-                self.collection_search_toggle,
-            ],
+            controls=[self.collection_dropdown, self.collection_search_toggle],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
         
-        # Layout principal
         main_layout = ft.Column(
             controls=[
-                ft.Container(
-                    content=self.toolbar,
-                    bgcolor="surfacevariant",
-                    padding=10,
-                ),
+                ft.Container(content=self.toolbar, bgcolor="#333333", padding=10),
                 self.chat_container,
                 ft.Divider(height=1),
-                ft.Container(
-                    content=collection_controls,
-                    padding=10,
-                ),
-                ft.Container(
-                    content=input_area,
-                    padding=10,
-                ),
+                ft.Container(content=collection_controls, padding=10),
+                ft.Container(content=input_area, padding=10),
             ],
             expand=True,
         )
         
         self.page.add(main_layout)
-        
-        # Carrega collections disponíveis
         self.refresh_collections()
-        
-        # Adiciona mensagem de boas-vindas
-        self.add_system_message(
-            "👨‍⚖️ **Sistema de Busca de Precedentes Trabalhistas**\n\n"
-            "Bem-vindo, Vossa Excelência! Este sistema permite buscar precedentes "
-            "nas sentenças indexadas usando busca semântica com xAI Collections.\n\n"
-            "**Como usar:**\n"
-            "1. Configure suas credenciais em ⚙️ Configurações\n"
-            "2. Selecione uma Collection no menu suspenso\n"
-            "3. Habilite 'Buscar na Collection' para usar busca semântica\n"
-            "4. Digite sua consulta jurídica\n\n"
-            "O sistema buscará precedentes relevantes e fornecerá fundamentação baseada nas suas sentenças."
-        )
+        self.add_system_message("👨‍⚖️ **Sistema de Busca de Precedentes Trabalhistas**")
     
     def refresh_collections(self):
-        """Atualiza lista de Collections disponíveis."""
+        """Atualiza collections."""
         if not self.xai_client:
             return
         
         collections = self.xai_client.list_collections()
         self.collection_dropdown.options = [
-            ft.dropdown.Option(key=col["id"], text=col.get("name", col["id"]))
+            ft.dropdown.Option(key=str(col["id"]), text=str(col.get("name", col["id"])))
             for col in collections
         ]
         
-        # Restaura seleção anterior se disponível
         selected_id = self.config_manager.get("selected_collection_id")
         if selected_id and any(opt.key == selected_id for opt in self.collection_dropdown.options):
-            self.collection_dropdown.value = selected_id
+            self.collection_dropdown.value = str(selected_id)
         
         self.page.update()
     
     def on_collection_changed(self, e):
-        """Callback quando Collection é selecionada."""
+        """Callback quando a collection é alterada."""
         self.config_manager.set("selected_collection_id", self.collection_dropdown.value)
     
-    def on_collection_toggle_changed(self, e):
-        """Callback quando toggle de busca é alterado."""
-        pass  # Nada a fazer aqui, valor é lido ao enviar mensagem
-    
     def add_message(self, content: str, is_user: bool = True):
-        """
-        Adiciona mensagem ao chat.
-        
-        Args:
-            content: Conteúdo da mensagem
-            is_user: Se é mensagem do usuário ou do assistente
-        """
-        row_controls: List[Any] = [
-            ft.Icon(
-                "person" if is_user else "smart_toy", # type: ignore
-                size=20,
-            ),
-            ft.Text(
-                "Você" if is_user else "Grok",
-                weight=ft.FontWeight.BOLD,
-                size=14,
-            ),
-            ft.Text(
-                datetime.now().strftime("%H:%M"),
-                size=12,
-                color="grey",
-            ),
+        """Adiciona mensagem ao chat."""
+        row_controls = [
+            ft.Icon(icon=cast(Any, "person" if is_user else "smart_toy"), size=20),
+            ft.Text("Você" if is_user else "Grok", weight=ft.FontWeight.BOLD, size=14),
+            ft.Text(datetime.now().strftime("%H:%M"), size=12, color="grey"),
         ]
         message_card = ft.Card(
             content=ft.Container(
                 content=ft.Column([
                     ft.Row(controls=row_controls),
-                    ft.Markdown(
-                        content,
-                        selectable=True,
-                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                    ),
+                    ft.Markdown(content, selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB),
                 ]),
                 padding=15,
             ),
             elevation=2,
         )
-        
         self.chat_container.controls.append(message_card)
         self.page.update()
     
@@ -389,329 +294,156 @@ class PrecedenteSearchApp:
         """Adiciona mensagem do sistema."""
         system_card = ft.Card(
             content=ft.Container(
-                content=ft.Markdown(
-                    content,
-                    selectable=True,
-                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                ),
+                content=ft.Markdown(content, selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB),
                 padding=15,
-                bgcolor="bluegrey900" if self.config_manager.get("theme_dark") else "bluegrey100",
+                bgcolor="#1a1a1a" if self.config_manager.get("theme_dark") else "#f0f0f0",
             ),
             elevation=1,
         )
-        
         self.chat_container.controls.append(system_card)
         self.page.update()
     
     def clear_chat(self, e):
-        """Limpa o histórico do chat."""
+        """Limpa o chat."""
         self.chat_container.controls.clear()
         self.messages.clear()
         self.attached_files.clear()
-        self.add_system_message("🔄 Chat resetado. Histórico limpo.")
+        self.add_system_message("🔄 Chat resetado.")
         self.page.update()
     
     def copy_chat(self, e):
-        """Copia todo o chat para o clipboard."""
-        chat_text = []
-        for msg in self.messages:
-            role = "USUÁRIO" if msg["role"] == "user" else "GROK"
-            chat_text.append(f"[{role}]\n{msg['content']}\n")
-        
-        full_text = "\n".join(chat_text)
+        """Copia chat para o clipboard."""
+        chat_text = [f"[{'USUÁRIO' if msg['role'] == 'user' else 'GROK'}]\n{msg['content']}\n" for msg in self.messages]
         try:
-            pyperclip.copy(full_text)
-            self.add_system_message("✅ Chat copiado para o clipboard!")
+            pyperclip.copy("\n".join(chat_text))
+            self.add_system_message("✅ Chat copiado!")
         except Exception as ex:
-            self.add_system_message(f"❌ Erro ao copiar: {str(ex)}")
+            self.add_system_message(f"❌ Erro ao copiar: {ex}")
     
-    def attach_file(self, e):
-        """Abre diálogo para anexar arquivo."""
-        def on_file_selected(e: Any):
-            if e.files:
-                for file in e.files:
-                    self.attached_files.append(file.path)
-                    self.add_system_message(f"📎 Arquivo anexado: {file.name}")
-        
-        file_picker = ft.FilePicker(on_result=on_file_selected) # type: ignore
+    async def attach_file(self, e):
+        """Anexa um arquivo."""
+        file_picker = ft.FilePicker()
         self.page.overlay.append(file_picker)
         self.page.update()
-        # Em algumas versões do Flet, pick_files é síncrono ou disparado via evento
+        
         try:
-            file_picker.pick_files(allow_multiple=True) # type: ignore
-        except Exception:
-            pass
+            files = await file_picker.pick_files(allow_multiple=True)
+            if files:
+                for file in files:
+                    if file.path:
+                        self.attached_files.append(str(file.path))
+                        self.add_system_message(f"📎 Arquivo anexado: {file.name}")
+                self.page.update()
+        except Exception as ex:
+            print(f"Erro ao anexar arquivo: {ex}")
+        finally:
+            self.page.overlay.remove(file_picker)
+            self.page.update()
     
     def build_tools(self) -> Optional[List[Dict]]:
-        """
-        Constrói lista de tools para a API, incluindo Collection Search Tool se habilitado.
-        
-        Returns:
-            Lista de ferramentas ou None
-        """
-        if not self.collection_search_toggle.value:
+        """Constrói as ferramentas da API."""
+        if not self.collection_search_toggle.value or not self.collection_dropdown.value:
             return None
-        
-        collection_id = self.collection_dropdown.value
-        if not collection_id:
-            return None
-        
-        # Collection Search Tool conforme documentação xAI
-        tools = [
-            {
-                "type": "collection_search",
-                "collection_id": collection_id,
-                "search_parameters": {
-                    "search_type": "hybrid",  # Busca híbrida (semântica + keywords)
-                    "top_k": 5,  # Retorna top 5 resultados mais relevantes
-                }
-            }
-        ]
-        
-        return tools
+        return [{
+            "type": "collection_search",
+            "collection_id": str(self.collection_dropdown.value),
+            "search_parameters": {"search_type": "hybrid", "top_k": 5}
+        }]
     
-    def send_message(self, e):
-        """Envia mensagem para o modelo."""
-        user_message = self.message_input.value.strip()
-        if not user_message:
+    async def send_message_click(self, e):
+        """Ponte para chamada async."""
+        await self.send_message(e)
+
+    async def send_message(self, e):
+        """Envia uma mensagem."""
+        user_message = str(self.message_input.value or "").strip()
+        if not user_message or not self.config_manager.get("api_key"):
             return
         
-        # Valida configurações
-        if not self.config_manager.get("api_key"):
-            self.add_system_message("❌ Configure sua API Key em ⚙️ Configurações")
-            return
-        
-        # Adiciona mensagem do usuário ao chat
         self.add_message(user_message, is_user=True)
-        
-        # Limpa campo de entrada
         self.message_input.value = ""
         self.page.update()
         
-        # Prepara mensagens
-        messages = []
-        
-        # System prompt
-        system_prompt = self.config_manager.get("system_prompt")
-        if system_prompt:
-            messages.append({
-                "role": "system",
-                "content": system_prompt
-            })
-        
-        # Adiciona contexto de arquivos anexados
+        messages = [{"role": "system", "content": str(self.config_manager.get("system_prompt") or "")}]
         if self.attached_files:
-            file_context = "Arquivos anexados para contexto:\n"
-            for filepath in self.attached_files:
+            ctx = "Arquivos anexados:\n"
+            for f in self.attached_files:
                 try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()[:5000]  # Limita tamanho
-                        file_context += f"\n--- {Path(filepath).name} ---\n{content}\n"
-                except Exception as ex:
-                    file_context += f"\n[Erro ao ler {filepath}: {ex}]\n"
-            
-            messages.append({
-                "role": "system",
-                "content": file_context
-            })
+                    with open(f, 'r', encoding='utf-8') as f_content:
+                        ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:5000]}\n"
+                except Exception: pass
+            messages.append({"role": "system", "content": ctx})
         
-        # Adiciona histórico de mensagens anteriores
         messages.extend(self.messages)
+        messages.append({"role": "user", "content": user_message})
+        self.messages.append({"role": "user", "content": user_message})
         
-        # Adiciona mensagem atual
-        messages.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Atualiza histórico
-        self.messages.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Constrói tools
-        tools = self.build_tools()
-        
-        # Mostra indicador de carregamento
-        loading_indicator = ft.ProgressBar()
-        self.chat_container.controls.append(loading_indicator)
+        loading = ft.ProgressBar()
+        self.chat_container.controls.append(loading)
         self.page.update()
         
         try:
-            # Envia para API
-            if self.xai_client is None:
-                raise Exception("Cliente xAI não inicializado. Verifique sua API Key.")
-
+            if not self.xai_client: raise Exception("Cliente não inicializado")
             response = self.xai_client.chat_completion(
                 messages=messages,
-                model=self.config_manager.get("model"),
-                temperature=self.config_manager.get("temperature"),
-                tools=tools,
-                stream=False
+                model=str(self.config_manager.get("model") or "grok-2-1212"),
+                temperature=float(self.config_manager.get("temperature") or 0.7),
+                tools=self.build_tools(),
             )
-            
-            # Processa resposta
-            assistant_message = response["choices"][0]["message"]["content"]
-            
-            # Adiciona resposta ao chat
-            self.add_message(assistant_message, is_user=False)
-            
-            # Atualiza histórico
-            self.messages.append({
-                "role": "assistant",
-                "content": assistant_message
-            })
-            
+            ans = str(response["choices"][0]["message"]["content"])
+            self.add_message(ans, is_user=False)
+            self.messages.append({"role": "assistant", "content": ans})
         except Exception as ex:
-            self.add_system_message(f"❌ Erro ao enviar mensagem: {str(ex)}")
+            self.add_system_message(f"❌ Erro: {ex}")
         finally:
-            # Remove indicador de carregamento
-            self.chat_container.controls.remove(loading_indicator)
+            self.chat_container.controls.remove(loading)
             self.page.update()
     
     def open_settings(self, e):
-        """Abre diálogo de configurações."""
-        # Campos de configuração
-        management_key_field = ft.TextField(
-            label="Management Key (xAI Collections)",
-            value=self.config_manager.get("management_key"),
-            password=True,
-            can_reveal_password=True,
-            width=500,
-        )
+        """Abre o diálogo de configurações."""
+        m_key = ft.TextField(label="Management Key", value=str(self.config_manager.get("management_key") or ""), password=True, can_reveal_password=True)
+        a_key = ft.TextField(label="API Key", value=str(self.config_manager.get("api_key") or ""), password=True, can_reveal_password=True)
+        model = ft.Dropdown(label="Modelo", value=str(self.config_manager.get("model") or "grok-2-1212"), options=[
+            ft.dropdown.Option("grok-2-1212"), ft.dropdown.Option("grok-2-vision-1212"), ft.dropdown.Option("grok-beta")
+        ])
+        temp = ft.Slider(min=0, max=2, divisions=20, value=float(self.config_manager.get("temperature") or 0.7), label="Temp: {value}")
+        sys_p = ft.TextField(label="System Prompt", value=str(self.config_manager.get("system_prompt") or ""), multiline=True)
+        theme = ft.Switch(label="Tema Escuro", value=bool(self.config_manager.get("theme_dark")))
         
-        api_key_field = ft.TextField(
-            label="API Key (Grok)",
-            value=self.config_manager.get("api_key"),
-            password=True,
-            can_reveal_password=True,
-            width=500,
-        )
-        
-        model_dropdown = ft.Dropdown(
-            label="Modelo",
-            value=self.config_manager.get("model"),
-            options=[
-                ft.dropdown.Option("grok-2-1212", "Grok 2 (Dezembro 2024)"),
-                ft.dropdown.Option("grok-2-vision-1212", "Grok 2 Vision"),
-                ft.dropdown.Option("grok-beta", "Grok Beta"),
-            ],
-            width=500,
-        )
-        
-        temperature_slider = ft.Slider(
-            min=0,
-            max=2,
-            divisions=20,
-            value=self.config_manager.get("temperature"),
-            label="Temperature: {value}",
-            width=500,
-        )
-        
-        system_prompt_field = ft.TextField(
-            label="System Prompt",
-            value=self.config_manager.get("system_prompt"),
-            multiline=True,
-            min_lines=3,
-            max_lines=5,
-            width=500,
-        )
-        
-        realtime_web_toggle = ft.Switch(
-            label="Real-time Web Search",
-            value=self.config_manager.get("realtime_web_search"),
-        )
-        
-        realtime_x_toggle = ft.Switch(
-            label="Real-time X (Twitter) Search",
-            value=self.config_manager.get("realtime_x_search"),
-        )
-        
-        url_citation_toggle = ft.Switch(
-            label="URL Source Citation",
-            value=self.config_manager.get("url_citation"),
-        )
-        
-        theme_toggle = ft.Switch(
-            label="Tema Escuro",
-            value=self.config_manager.get("theme_dark"),
-        )
-        
-        def save_settings(e):
-            """Salva configurações e fecha diálogo."""
-            self.config_manager.set("management_key", management_key_field.value)
-            self.config_manager.set("api_key", api_key_field.value)
-            self.config_manager.set("model", model_dropdown.value)
-            self.config_manager.set("temperature", temperature_slider.value)
-            self.config_manager.set("system_prompt", system_prompt_field.value)
-            self.config_manager.set("realtime_web_search", realtime_web_toggle.value)
-            self.config_manager.set("realtime_x_search", realtime_x_toggle.value)
-            self.config_manager.set("url_citation", url_citation_toggle.value)
-            self.config_manager.set("theme_dark", theme_toggle.value)
-            
-            # Atualiza cliente xAI
+        def save(e):
+            self.config_manager.set("management_key", m_key.value)
+            self.config_manager.set("api_key", a_key.value)
+            self.config_manager.set("model", model.value)
+            self.config_manager.set("temperature", temp.value)
+            self.config_manager.set("system_prompt", sys_p.value)
+            self.config_manager.set("theme_dark", theme.value)
             self.update_xai_client()
-            
-            # Atualiza tema
-            self.page.theme_mode = ft.ThemeMode.DARK if theme_toggle.value else ft.ThemeMode.LIGHT
-            
-            # Atualiza collections
+            self.page.theme_mode = ft.ThemeMode.DARK if theme.value else ft.ThemeMode.LIGHT
             self.refresh_collections()
+            self.close_dialog(dlg)
+            self.page.update()
             
-            settings_dialog.open = False
-            self.page.update()
-            self.add_system_message("✅ Configurações salvas!")
-        
-        # Diálogo de configurações
-        settings_dialog = ft.AlertDialog(
-            title=ft.Text("⚙️ Configurações"),
-            content=ft.Container(
-                content=ft.Column([
-                    management_key_field,
-                    api_key_field,
-                    model_dropdown,
-                    ft.Row([ft.Text("Temperature:"), temperature_slider]),
-                    system_prompt_field,
-                    ft.Divider(),
-                    realtime_web_toggle,
-                    realtime_x_toggle,
-                    url_citation_toggle,
-                    theme_toggle,
-                ], scroll=ft.ScrollMode.AUTO),
-                width=550,
-                height=600,
-            ),
-            actions=[
-                ft.TextButton("Cancelar", on_click=lambda _: self.close_dialog(settings_dialog)),
-                ft.ElevatedButton("Salvar", on_click=save_settings),
-            ],
+        dlg = ft.AlertDialog(
+            title=ft.Text("Configurações"),
+            content=ft.Column([m_key, a_key, model, ft.Text("Temperature:"), temp, sys_p, theme], scroll=ft.ScrollMode.AUTO, height=400),
+            actions=[ft.ElevatedButton(content=ft.Text("Salvar"), on_click=save)]
         )
-        
-        self.open_dialog(settings_dialog)
+        self.open_dialog(dlg)
 
-    def open_dialog(self, dialog):
-        """Abre um diálogo de forma compatível."""
-        if hasattr(self.page, "open"):
-            self.page.open(dialog) # type: ignore
-        else:
-            setattr(self.page, "dialog", dialog)
-            dialog.open = True
-            self.page.update()
+    def open_dialog(self, dlg):
+        """Abre o diálogo."""
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
 
-    def close_dialog(self, dialog):
-        """Fecha um diálogo de forma compatível."""
-        if hasattr(self.page, "close"):
-            self.page.close(dialog) # type: ignore
-        else:
-            dialog.open = False
-            self.page.update()
+    def close_dialog(self, dlg):
+        """Fecha o diálogo."""
+        dlg.open = False
+        self.page.update()
 
 
 def main(page: ft.Page):
-    """Função principal da aplicação."""
     PrecedenteSearchApp(page)
-
 
 if __name__ == "__main__":
     ft.app(target=main)

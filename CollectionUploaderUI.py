@@ -11,7 +11,7 @@ import os
 import re
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, cast
 from datetime import datetime
 import requests
 
@@ -142,9 +142,11 @@ class CollectionUploaderUI:
         
         # Botão para carregar Collections
         self.load_collections_btn = ft.ElevatedButton(
-            "Carregar Collections",
-            icon=ft.Icon(ft.icons.REFRESH),
-            on_click=self.load_collections,
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Carregar Collections")]),
+                tight=True
+            ),
+            on_click=self.load_collections_click,
             disabled=True
         )
         
@@ -153,9 +155,9 @@ class CollectionUploaderUI:
             label="Collection para Upload",
             hint_text="Selecione a collection",
             options=[],
-            width=450,
             on_blur=self.on_collection_change,
-            disabled=True
+            disabled=True,
+            width=450
         )
         
         return ft.Container(
@@ -167,7 +169,7 @@ class CollectionUploaderUI:
                 ft.Row([self.model_dropdown], spacing=10),
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, "#90CAF9"),
+            border=ft.Border.all(1, "#90CAF9"),
             border_radius=10
         )
     
@@ -176,8 +178,10 @@ class CollectionUploaderUI:
         
         # Botão para selecionar JSON
         self.json_picker_btn = ft.ElevatedButton(
-            "Selecionar Arquivos JSON",
-            icon=ft.Icon(ft.icons.INSERT_DRIVE_FILE),
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.INSERT_DRIVE_FILE), ft.Text("Selecionar Arquivos JSON")]),
+                tight=True
+            ),
             on_click=self.pick_json_files
         )
         
@@ -190,8 +194,10 @@ class CollectionUploaderUI:
         
         # Botão para selecionar pasta de saída
         self.folder_picker_btn = ft.ElevatedButton(
-            "Selecionar Pasta de Saída",
-            icon=ft.Icon(ft.icons.FOLDER_OPEN),
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.FOLDER_OPEN), ft.Text("Selecionar Pasta de Saída")]),
+                tight=True
+            ),
             on_click=self.pick_output_folder
         )
         
@@ -212,7 +218,7 @@ class CollectionUploaderUI:
                 self.output_folder_text,
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, "#A5D6A7"),
+            border=ft.Border.all(1, "#A5D6A7"),
             border_radius=10
         )
     
@@ -221,9 +227,11 @@ class CollectionUploaderUI:
         
         # Botão para gerar MDs
         self.generate_md_btn = ft.ElevatedButton(
-            "Gerar Arquivos MD",
-            icon=ft.Icon(ft.icons.CREATE_NEW_FOLDER),
-            on_click=self.generate_md_files,
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CREATE_NEW_FOLDER), ft.Text("Gerar Arquivos MD")]),
+                tight=True
+            ),
+            on_click=self.generate_md_files_click,
             disabled=True,
             bgcolor="#1976D2",
             color="#FFFFFF"
@@ -231,9 +239,11 @@ class CollectionUploaderUI:
         
         # Botão para fazer upload
         self.upload_btn = ft.ElevatedButton(
-            "Upload para Collection",
-            icon=ft.Icon(ft.icons.CLOUD_UPLOAD),
-            on_click=self.upload_to_collection,
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CLOUD_UPLOAD), ft.Text("Upload para Collection")]),
+                tight=True
+            ),
+            on_click=self.upload_to_collection_click,
             disabled=True,
             bgcolor="#388E3C",
             color="#FFFFFF"
@@ -255,7 +265,7 @@ class CollectionUploaderUI:
                 self.progress_bar
             ], spacing=15),
             padding=20,
-            border=ft.border.all(1, "#FFCC80"),
+            border=ft.Border.all(1, "#FFCC80"),
             border_radius=10
         )
     
@@ -263,77 +273,81 @@ class CollectionUploaderUI:
     
     def on_management_key_change(self, e):
         """Callback quando Management Key muda."""
-        self.management_key = e.control.value
+        self.management_key = str(e.control.value or "")
         self.load_collections_btn.disabled = len(self.management_key) == 0
         self.page.update()
     
     def on_api_key_change(self, e):
         """Callback quando API Key muda."""
-        self.api_key = e.control.value
+        self.api_key = str(e.control.value or "")
         self.check_generate_button_state()
     
     def on_model_change(self, e):
         """Callback quando modelo muda."""
-        self.selected_model = e.control.value
+        self.selected_model = str(e.control.value or "grok-beta")
     
     def on_collection_change(self, e):
         """Callback quando collection muda."""
-        self.selected_collection_id = e.control.value
+        self.selected_collection_id = str(e.control.value or "")
         self.check_upload_button_state()
     
-    def pick_json_files(self, e):
+    async def pick_json_files(self, e):
         """Abre file picker para selecionar arquivos JSON."""
-        def handle_result(e):
-            self.on_json_files_selected(e)
-        
-        file_picker = ft.FilePicker(on_result=handle_result)
+        file_picker = ft.FilePicker()
         self.page.overlay.append(file_picker)
         self.page.update()
-        file_picker.pick_files(
-            dialog_title="Selecione os arquivos JSON",
-            allow_multiple=True,
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["json", "txt"]
-        )
-    
-    def on_json_files_selected(self, e):
-        """Callback quando arquivos JSON são selecionados."""
-        if e.files:
-            self.selected_json_files = [f.path for f in e.files]
-            files_text = "\n".join([f"• {os.path.basename(path)}" for path in self.selected_json_files])
-            self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
-            self.json_files_list.color = "#388E3C"
-            self.check_generate_button_state()
-        else:
-            self.selected_json_files = []
-            self.json_files_list.value = "Nenhum arquivo selecionado"
-            self.json_files_list.color = "#616161"
         
-        self.page.update()
+        try:
+            files = await file_picker.pick_files(
+                dialog_title="Selecione os arquivos JSON",
+                allow_multiple=True,
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["json", "txt"]
+            )
+            
+            if files:
+                self.selected_json_files = [str(f.path) for f in files if f.path]
+                files_text = "\n".join([f"• {os.path.basename(path)}" for path in self.selected_json_files])
+                self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
+                self.json_files_list.color = "#388E3C"
+                self.check_generate_button_state()
+            else:
+                self.selected_json_files = []
+                self.json_files_list.value = "Nenhum arquivo selecionado"
+                self.json_files_list.color = "#616161"
+            
+            self.page.update()
+        except Exception as ex:
+            print(f"Erro ao selecionar arquivos: {ex}")
+        finally:
+            self.page.overlay.remove(file_picker)
+            self.page.update()
     
-    def pick_output_folder(self, e):
+    async def pick_output_folder(self, e):
         """Abre folder picker para selecionar pasta de saída."""
-        def handle_result(e):
-            self.on_output_folder_selected(e)
-        
-        folder_picker = ft.FilePicker(on_result=handle_result)
+        folder_picker = ft.FilePicker()
         self.page.overlay.append(folder_picker)
         self.page.update()
-        folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
-    
-    def on_output_folder_selected(self, e):
-        """Callback quando pasta de saída é selecionada."""
-        if e.path:
-            self.output_directory = e.path
-            self.output_folder_text.value = f"Pasta: {self.output_directory}"
-            self.output_folder_text.color = "#388E3C"
-            self.check_generate_button_state()
-        else:
-            self.output_directory = ""
-            self.output_folder_text.value = "Nenhuma pasta selecionada"
-            self.output_folder_text.color = "#616161"
         
-        self.page.update()
+        try:
+            path = await folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
+            
+            if path:
+                self.output_directory = str(path)
+                self.output_folder_text.value = f"Pasta: {self.output_directory}"
+                self.output_folder_text.color = "#388E3C"
+                self.check_generate_button_state()
+            else:
+                self.output_directory = ""
+                self.output_folder_text.value = "Nenhuma pasta selecionada"
+                self.output_folder_text.color = "#616161"
+            
+            self.page.update()
+        except Exception as ex:
+            print(f"Erro ao selecionar pasta: {ex}")
+        finally:
+            self.page.overlay.remove(folder_picker)
+            self.page.update()
     
     def check_generate_button_state(self):
         """Verifica se o botão de gerar MD pode ser habilitado."""
@@ -362,6 +376,18 @@ class CollectionUploaderUI:
         self.feedback_text.value += log_entry
         self.page.update()
     
+    async def load_collections_click(self, e):
+        """Ponte para chamada async."""
+        await self.load_collections(e)
+
+    async def generate_md_files_click(self, e):
+        """Ponte para chamada async."""
+        await self.generate_md_files(e)
+
+    async def upload_to_collection_click(self, e):
+        """Ponte para chamada async."""
+        await self.upload_to_collection(e)
+
     async def load_collections(self, e):
         """Carrega lista de collections disponíveis."""
         self.log("🔄 Carregando collections disponíveis...")
@@ -385,7 +411,7 @@ class CollectionUploaderUI:
                 # Atualiza dropdown
                 self.collections_dropdown.options = [
                     ft.dropdown.Option(
-                        key=col["id"],
+                        key=str(col["id"]),
                         text=f"{col['name']} ({col['id'][:8]}...)"
                     )
                     for col in self.collections_list
@@ -461,10 +487,10 @@ class CollectionUploaderUI:
     
     async def process_sentenca(self, item: Dict[str, Any], index: int, output_path: Path):
         """Processa uma sentença individual."""
-        conteudo = item['conteudo'].strip()
+        conteudo = str(item['conteudo']).strip()
         
         # Extrai keywords usando Grok
-        keywords = await self.extract_keywords_with_grok(conteudo, item['categoria'])
+        keywords = await self.extract_keywords_with_grok(conteudo, str(item['categoria']))
         
         # Atualiza estatísticas
         self.stats['categorias'].add(item['categoria'])
@@ -475,8 +501,8 @@ class CollectionUploaderUI:
         
         for chunk_idx, chunk in enumerate(chunks):
             # Cria nome de arquivo
-            categoria_safe = self.sanitize_filename(item['categoria'])
-            processo_safe = item['numero_processo'].replace('.', '_').replace('-', '_')
+            categoria_safe = self.sanitize_filename(str(item['categoria']))
+            processo_safe = str(item['numero_processo']).replace('.', '_').replace('-', '_')
             
             if len(chunks) > 1:
                 filename = f"{index:04d}_{processo_safe}_{categoria_safe}_part{chunk_idx+1:02d}.md"
@@ -544,7 +570,7 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
             
             if response.status_code == 200:
                 data = response.json()
-                keywords_text = data["choices"][0]["message"]["content"].strip()
+                keywords_text = str(data["choices"][0]["message"]["content"]).strip()
                 keywords = [k.strip() for k in keywords_text.split(",")]
                 return keywords[:10]
             else:
