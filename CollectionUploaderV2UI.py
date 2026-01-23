@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-CollectionUploaderV2UI.py - VERSÃO CORRIGIDA
+CollectionUploaderV2UI.py - VERSÃO CORRIGIDA COM MELHORIAS
 Interface gráfica Flet para o CollectionUploader.py
 Permite processar JSONs para MD e fazer upload para xAI Collections
+
+Melhorias implementadas:
+1. FilePicker corrigido usando tkinter.filedialog
+2. Armazenamento persistente de chaves API
+3. Seleção dinâmica de collections
+4. Seleção dinâmica de modelos
 """
 
 import flet as ft
@@ -14,6 +20,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, cast
 from datetime import datetime
 import requests
+import tkinter as tk
+from tkinter import filedialog
 
 
 class CollectionUploaderV2UI:
@@ -58,123 +66,349 @@ class CollectionUploaderV2UI:
             "tipos_acao": set(),
         }
         
+        # Configuração
+        self.config_file = "config.json"
+        
+        # Inicializar feedback_text antes de carregar config
+        self.feedback_text = None
+        
+        # Estado do tema (dark mode)
+        self.dark_mode = False
+        
+        # Tkinter root para file dialogs (criado e mantido oculto)
+        self.tk_root = None
+        
         self.build_ui()
+        
+        # Carregar configuração salva (após UI construída)
+        self.load_config()
+    
+    def load_config(self):
+        """Carrega configuração salva do arquivo config.json."""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    
+                    # Preenche campos com valores salvos
+                    self.management_key = config.get("management_key", "")
+                    self.api_key = config.get("api_key", "")
+                    self.selected_model = config.get("selected_model", "grok-beta")
+                    
+
+                self.log("✅ Configuração carregada do arquivo config.json")
+            else:
+                self.log("ℹ️ Arquivo de configuração não encontrado. Usando padrões.")
+        except Exception as e:
+            self.log(f"⚠️ Erro ao carregar configuração: {str(e)}")
+
+    def save_config(self):
+        """Salva configuração atual no arquivo config.json."""
+        try:
+            config = {
+                "management_key": self.management_key,
+                "api_key": self.api_key,
+                "selected_model": self.selected_model
+            }
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            self.log("💾 Configuração salva no arquivo config.json")
+        except Exception as e:
+            self.log(f"⚠️ Erro ao salvar configuração: {str(e)}")
     
     def build_ui(self):
         """Constrói a interface do usuário."""
         
-        # Título
-        title = ft.Text(
-            "Collection Uploader V2 - xAI (Upload Direto) Collections",
-            size=28,
-            weight=ft.FontWeight.BOLD,
-            color="#1976D2"
+        # Título com ícone de configuração
+        title_row = ft.Row(
+            controls=[
+                ft.Text(
+                    "Collection Uploader V2 - xAI (Upload Direto)",
+                    size=28,
+                    weight=ft.FontWeight.BOLD,
+                    color="#1976D2",
+                    expand=True
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS,
+                    icon_size=30,
+                    icon_color="#1976D2",
+                    tooltip="Configurações",
+                    on_click=self.open_config_dialog
+                )
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
         )
         
-        # Seção de Configuração
-        config_section = self.create_config_section()
-        
-        # Seção de Seleção de Arquivos
+        # Seção de Seleção de Arquivos (renomeada)
         files_section = self.create_files_section()
         
         # Seção de Ações
         actions_section = self.create_actions_section()
         
         # Janela de Feedback
+        # Define cores baseado no modo inicial (light)
+        if self.dark_mode:
+            feedback_bgcolor = "#1e1e1e"
+            feedback_color = "#ffffff"
+        else:
+            feedback_bgcolor = "#f5f5f5"
+            feedback_color = "#000000"
+
         self.feedback_text = ft.TextField(
             label="Log de Execução",
             multiline=True,
             read_only=True,
             min_lines=10,
             max_lines=15,
-            bgcolor="#263238",
-            color="#FFFFFF",
-            border_color="#42A5F5"
+            bgcolor=feedback_bgcolor,
+            color=feedback_color,
+            border_color="#42A5F5",
+            expand=True,
+            width=960  # Fixed width to avoid None arithmetic
         )
         
         # Layout principal
         self.page.add(
             ft.Column([
-                title,
-                ft.Divider(height=20),
-                config_section,
+                title_row,
                 ft.Divider(height=20),
                 files_section,
                 ft.Divider(height=20),
                 actions_section,
                 ft.Divider(height=20),
-                self.feedback_text
-            ], spacing=10, scroll=ft.ScrollMode.AUTO)
+                ft.Container(
+                    content=self.feedback_text,
+                    border=ft.Border.all(1, "#42A5F5"),
+                    border_radius=10,
+                    padding=10
+                )
+            ], spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
         )
-    
-    def create_config_section(self) -> ft.Container:
-        """Cria a seção de configuração."""
         
-        # Campo Management Key
-        self.management_key_field = ft.TextField(
+        # Criar diálogo de configuração (inicialmente oculto)
+        self.create_config_dialog()
+    
+    def create_config_dialog(self):
+        """Cria o diálogo de configuração."""
+        # Campos para o diálogo
+        self.dialog_management_key_field = ft.TextField(
             label="Management Key (xAI Collection)",
             hint_text="Chave de gerenciamento da Collection",
             password=True,
             can_reveal_password=True,
             width=450,
-            on_change=self.on_management_key_change
+            value=self.management_key,
+            on_change=self.on_dialog_management_key_change
         )
         
-        # Campo API Key
-        self.api_key_field = ft.TextField(
+        self.dialog_api_key_field = ft.TextField(
             label="API Key (Grok)",
             hint_text="Chave de API do Grok para geração de keywords",
             password=True,
             can_reveal_password=True,
             width=450,
-            on_change=self.on_api_key_change
+            value=self.api_key,
+            on_change=self.on_dialog_api_key_change
         )
         
-        # Dropdown de Modelo
-        self.model_dropdown = ft.Dropdown(
+        # Dropdown de Modelo no diálogo
+        self.dialog_model_dropdown = ft.Dropdown(
             label="Modelo para Geração de Keywords",
             hint_text="Selecione o modelo",
             options=[ft.dropdown.Option(model) for model in self.available_models],
-            value="grok-beta",
+            value=self.selected_model,
             width=300,
-            on_blur=self.on_model_change
+            on_blur=self.on_dialog_model_change
         )
         
-        # Botão para carregar Collections
-        self.load_collections_btn = ft.ElevatedButton(
+        # Botão para atualizar modelos no diálogo
+        self.dialog_refresh_models_btn = ft.ElevatedButton(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Carregar Collections")]),
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Atualizar Modelos")]),
                 tight=True
             ),
-            on_click=self.load_collections_click,
-            disabled=True
+            on_click=self.dialog_refresh_models_click,
+            disabled=len(self.api_key) == 0
         )
         
-        # Dropdown de Collections
-        self.collections_dropdown = ft.Dropdown(
+        # Dropdown de Collections no diálogo
+        self.dialog_collections_dropdown = ft.Dropdown(
             label="Collection para Upload",
             hint_text="Selecione a collection",
             options=[],
-            on_blur=self.on_collection_change,
+            on_blur=self.on_dialog_collection_change,
             disabled=True,
             width=450
         )
         
-        return ft.Container(
-            content=ft.Column([
-                ft.Text("⚙️ Configurações", size=20, weight=ft.FontWeight.BOLD),
-                ft.Row([self.management_key_field, self.load_collections_btn], spacing=10),
-                self.collections_dropdown,
-                ft.Row([self.api_key_field], spacing=10),
-                ft.Row([self.model_dropdown], spacing=10),
-            ], spacing=15),
-            padding=20,
-            border=ft.Border.all(1, "#90CAF9"),
-            border_radius=10
+        # Botão para carregar Collections no diálogo
+        self.dialog_load_collections_btn = ft.ElevatedButton(
+            content=ft.Row(
+                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Carregar Collections")]),
+                tight=True
+            ),
+            on_click=self.dialog_load_collections_click,
+            disabled=len(self.management_key) == 0
+        )
+        
+        # Toggle para Dark Mode
+        self.dark_mode_toggle = ft.Switch(
+            label="Dark Mode",
+            value=self.dark_mode,
+            on_change=self.on_dark_mode_toggle
+        )
+        
+        # Botão de fechar
+        close_button = ft.ElevatedButton(
+            content=ft.Text("Fechar"),
+            on_click=self.close_config_dialog
+        )
+        
+        # Conteúdo do diálogo
+        dialog_content = ft.Column([
+            ft.Text("⚙️ Configurações", size=24, weight=ft.FontWeight.BOLD),
+            ft.Divider(height=10),
+            ft.Text("Credenciais API", size=16, weight=ft.FontWeight.BOLD),
+            self.dialog_management_key_field,
+            ft.Row([self.dialog_load_collections_btn], spacing=10),
+            self.dialog_collections_dropdown,
+            ft.Divider(height=10),
+            self.dialog_api_key_field,
+            ft.Row([self.dialog_model_dropdown, self.dialog_refresh_models_btn], spacing=10),
+            ft.Divider(height=10),
+            ft.Text("Aparência", size=16, weight=ft.FontWeight.BOLD),
+            ft.Row([self.dark_mode_toggle], spacing=10)
+        ], spacing=15, width=600)
+
+        self.config_dialog = ft.AlertDialog(
+            modal=False,
+            title=ft.Text("Configurações"),
+            content=dialog_content,
+            actions=[close_button]
         )
     
+    def open_config_dialog(self, e):
+        """Abre o diálogo de configuração."""
+        # Atualiza valores dos campos do diálogo
+        self.dialog_management_key_field.value = self.management_key
+        self.dialog_api_key_field.value = self.api_key
+        self.dialog_model_dropdown.value = self.selected_model
+        self.dialog_load_collections_btn.disabled = len(self.management_key) == 0
+        self.dialog_refresh_models_btn.disabled = len(self.api_key) == 0
+        
+        # Atualiza dropdown de collections se houver dados
+        if self.collections_list:
+            self.dialog_collections_dropdown.options = [
+                ft.dropdown.Option(
+                    key=str(col.get("collection_id", "")),
+                    text=col.get("collection_name", str(col.get("collection_id", "")))
+                )
+                for col in self.collections_list
+            ]
+            self.dialog_collections_dropdown.disabled = False
+        
+        # Adiciona diálogo ao overlay apenas se não estiver já presente
+        if self.config_dialog not in self.page.overlay:
+            self.page.overlay.append(self.config_dialog)
+        self.config_dialog.open = True
+        self.page.update()
+    
+    def close_config_dialog(self, e):
+        """Fecha o diálogo de configuração."""
+        self.log("🗂️ Fechando diálogo de configuração...")
+        self.config_dialog.open = False
+        self.page.update()
+    
+    def on_dialog_management_key_change(self, e):
+        """Callback quando Management Key muda no diálogo."""
+        self.management_key = str(e.control.value or "")
+        self.dialog_load_collections_btn.disabled = len(self.management_key) == 0
+        self.save_config()
+        self.page.update()
+    
+    def on_dialog_api_key_change(self, e):
+        """Callback quando API Key muda no diálogo."""
+        self.api_key = str(e.control.value or "")
+        self.dialog_refresh_models_btn.disabled = len(self.api_key) == 0
+        self.save_config()
+        self.page.update()
+    
+    def on_dialog_model_change(self, e):
+        """Callback quando modelo muda no diálogo."""
+        self.selected_model = str(e.control.value or "grok-beta")
+        self.save_config()
+    
+    def on_dialog_collection_change(self, e):
+        """Callback quando collection muda no diálogo."""
+        self.selected_collection_id = str(e.control.value or "")
+        self.check_upload_button_state()
+    
+    def on_dark_mode_toggle(self, e):
+        """Alterna entre light/dark mode."""
+        self.dark_mode = e.control.value
+        if self.dark_mode:
+            self.page.theme_mode = ft.ThemeMode.DARK
+            # Atualiza cores do feedback_text para dark mode
+            if self.feedback_text:
+                self.feedback_text.bgcolor = "#1e1e1e"
+                self.feedback_text.color = "#ffffff"
+        else:
+            self.page.theme_mode = ft.ThemeMode.LIGHT
+            # Atualiza cores do feedback_text para light mode
+            if self.feedback_text:
+                self.feedback_text.bgcolor = "#f5f5f5"
+                self.feedback_text.color = "#000000"
+        self.page.update()
+    
+    async def dialog_refresh_models_click(self, e):
+        """Callback para botão de atualizar modelos no diálogo."""
+        await self.fetch_models()
+        # Atualiza dropdown no diálogo após buscar modelos
+        if hasattr(self, 'dialog_model_dropdown'):
+            self.dialog_model_dropdown.options = [
+                ft.dropdown.Option(model_id) 
+                for model_id in self.available_models
+            ]
+            if self.selected_model not in self.available_models and self.available_models:
+                self.selected_model = self.available_models[0]
+            self.dialog_model_dropdown.value = self.selected_model
+            self.page.update()
+    
+    async def dialog_load_collections_click(self, e):
+        """Callback para botão de carregar collections no diálogo."""
+        self.log("🔄 Iniciando carregamento de collections via diálogo...")
+        await self.load_collections(e)
+        # Atualiza dropdown no diálogo após carregar collections
+        self.log(f"📋 Verificando collections_list: {len(self.collections_list) if self.collections_list else 0} itens")
+        try:
+            if self.collections_list:
+                self.log(f"📋 Atualizando dropdown com {len(self.collections_list)} collections")
+                options = [
+                    ft.dropdown.Option(
+                        key=str(col.get("collection_id", "")),
+                        text=str(col.get("collection_name", col.get("collection_id", "")))
+                    )
+                    for col in self.collections_list
+                ]
+                self.dialog_collections_dropdown.options = options
+                self.dialog_collections_dropdown.disabled = False
+                self.log(f"📋 Dropdown atualizado com {len(options)} opções")
+                self.page.update()
+            else:
+                self.log("⚠️ Nenhuma collection encontrada para atualizar dropdown")
+                self.dialog_collections_dropdown.options = []
+                self.dialog_collections_dropdown.disabled = True
+                self.page.update()
+        except Exception as ex:
+            self.log(f"❌ Erro ao atualizar dropdown: {str(ex)}")
+            import traceback
+            self.log(traceback.format_exc())
+    
+
+    
     def create_files_section(self) -> ft.Container:
-        """Cria a seção de seleção de arquivos."""
+        """Cria a seção de seleção de arquivos e pasta de saída."""
         
         # Botão para selecionar JSON
         self.json_picker_btn = ft.ElevatedButton(
@@ -182,7 +416,8 @@ class CollectionUploaderV2UI:
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.INSERT_DRIVE_FILE), ft.Text("Selecionar Arquivos JSON")]),
                 tight=True
             ),
-            on_click=self.pick_json_files
+            on_click=self.pick_json_files,
+            width=250
         )
         
         # Lista de arquivos selecionados
@@ -198,7 +433,8 @@ class CollectionUploaderV2UI:
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.FOLDER_OPEN), ft.Text("Selecionar Pasta de Saída")]),
                 tight=True
             ),
-            on_click=self.pick_output_folder
+            on_click=self.pick_output_folder,
+            width=250
         )
         
         # Pasta de saída selecionada
@@ -210,11 +446,10 @@ class CollectionUploaderV2UI:
         
         return ft.Container(
             content=ft.Column([
-                ft.Text("📁 Seleção de Arquivos", size=20, weight=ft.FontWeight.BOLD),
-                ft.Row([self.json_picker_btn], spacing=10),
-                self.json_files_list,
+                ft.Text("📁 Seleção de Arquivos e Pasta de Saída", size=20, weight=ft.FontWeight.BOLD),
+                ft.Row([self.json_picker_btn, self.folder_picker_btn], spacing=20, alignment=ft.MainAxisAlignment.CENTER),
                 ft.Divider(height=10),
-                ft.Row([self.folder_picker_btn], spacing=10),
+                self.json_files_list,
                 self.output_folder_text,
             ], spacing=15),
             padding=20,
@@ -271,42 +506,19 @@ class CollectionUploaderV2UI:
     
     # Callbacks
     
-    def on_management_key_change(self, e):
-        """Callback quando Management Key muda."""
-        self.management_key = str(e.control.value or "")
-        self.load_collections_btn.disabled = len(self.management_key) == 0
-        self.page.update()
-    
-    def on_api_key_change(self, e):
-        """Callback quando API Key muda."""
-        self.api_key = str(e.control.value or "")
-        self.check_generate_button_state()
-    
-    def on_model_change(self, e):
-        """Callback quando modelo muda."""
-        self.selected_model = str(e.control.value or "grok-beta")
-    
-    def on_collection_change(self, e):
-        """Callback quando collection muda."""
-        self.selected_collection_id = str(e.control.value or "")
-        self.check_upload_button_state()
-    
     async def pick_json_files(self, e):
         """Abre file picker para selecionar arquivos JSON."""
-        file_picker = ft.FilePicker()
-        self.page.overlay.append(file_picker)
-        self.page.update()
-        
-        files = await file_picker.pick_files(
-            dialog_title="Selecione os arquivos JSON",
-            allow_multiple=True,
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["json", "txt"]
+        # Usar tkinter filedialog em thread separada para não bloquear
+        files = await asyncio.to_thread(
+            lambda: filedialog.askopenfilenames(
+                title="Selecione os arquivos JSON",
+                filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")]
+            )
         )
 
         if files:
-            self.selected_json_files = [str(f.path) for f in files if f.path]
-            files_text = "\n".join([f"• {os.path.basename(path)}" for path in self.selected_json_files])
+            self.selected_json_files = list(files)
+            files_text = "\n".join([f"• {os.path.basename(path)}" for path in files])
             self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
             self.json_files_list.color = "#388E3C"
             self.check_generate_button_state()
@@ -315,8 +527,6 @@ class CollectionUploaderV2UI:
             self.json_files_list.value = "Nenhum arquivo selecionado"
             self.json_files_list.color = "#616161"
         
-        self.page.update()
-        self.page.overlay.remove(file_picker)
         self.page.update()
     
     def on_json_files_selected(self, e: Any):
@@ -336,11 +546,12 @@ class CollectionUploaderV2UI:
     
     async def pick_output_folder(self, e):
         """Abre folder picker para selecionar pasta de saída."""
-        folder_picker = ft.FilePicker()
-        self.page.overlay.append(folder_picker)
-        self.page.update()
-        
-        path = await folder_picker.get_directory_path(dialog_title="Selecione a pasta de saída")
+        # Usar tkinter filedialog em thread separada para não bloquear
+        path = await asyncio.to_thread(
+            lambda: filedialog.askdirectory(
+                title="Selecione a pasta de saída"
+            )
+        )
 
         if path:
             self.output_directory = str(path)
@@ -352,8 +563,6 @@ class CollectionUploaderV2UI:
             self.output_folder_text.value = "Nenhuma pasta selecionada"
             self.output_folder_text.color = "#616161"
         
-        self.page.update()
-        self.page.overlay.remove(folder_picker)
         self.page.update()
     
     def on_output_folder_selected(self, e: Any):
@@ -394,8 +603,9 @@ class CollectionUploaderV2UI:
         """Adiciona mensagem ao log de feedback."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
-        self.feedback_text.value += log_entry
-        self.page.update()
+        if self.feedback_text:
+            self.feedback_text.value += log_entry
+            self.page.update()
     
     async def load_collections_click(self, e):
         """Ponte para chamada async."""
@@ -413,42 +623,133 @@ class CollectionUploaderV2UI:
         """Carrega lista de collections disponíveis."""
         self.log("🔄 Carregando collections disponíveis...")
         
+        if not self.management_key:
+            self.log("⚠️ Management Key não configurada. Configure a Management Key para carregar collections.")
+            return
+            
         try:
             headers = {
                 "Authorization": f"Bearer {self.management_key}",
                 "Content-Type": "application/json"
             }
             
-            response = requests.get(
+            # Tenta primeiro o endpoint da API de gerenciamento
+            urls_to_try = [
+                "https://management-api.x.ai/v1/collections",
                 "https://api.x.ai/v1/collections",
+                "https://management-api.x.ai/v1/collections/list",
+                "https://api.x.ai/collections",
+                "https://management-api.x.ai/collections",
+                "https://api.x.ai/v1/collections/list",
+                "https://management-api.x.ai/collections/list"
+            ]
+            
+            response = None
+            last_error = None
+            
+            for url in urls_to_try:
+                try:
+                    self.log(f"   Tentando endpoint: {url}")
+                    use_headers = True if "management-api" in url else False
+                    response = requests.get(url, headers=headers if use_headers else {}, timeout=15)
+                    self.log(f"   Status: {response.status_code} (with headers: {use_headers})")
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        self.log(f"   Resposta recebida: tipo={type(data)}, chaves={list(data.keys()) if isinstance(data, dict) else 'não dict'}")
+
+                        # Tenta diferentes formatos de resposta
+                        collections = []
+                        if isinstance(data, list):
+                            collections = data
+                            self.log(f"   Dados são uma lista com {len(collections)} itens")
+                        elif "data" in data and isinstance(data["data"], list):
+                            collections = data["data"]
+                            self.log(f"   Dados em 'data': lista com {len(collections)} itens")
+                        elif "collections" in data and isinstance(data["collections"], list):
+                            collections = data["collections"]
+                            self.log(f"   Dados em 'collections': lista com {len(collections)} itens")
+                        else:
+                            self.log(f"   Formato de resposta não reconhecido: {data}")
+
+                        if collections:
+                            self.collections_list = collections
+                            self.log(f"✅ {len(self.collections_list)} collection(s) encontrada(s)")
+                            # Log primeiras collections para debug
+                            for i, col in enumerate(collections[:3]):
+                                self.log(f"   Collection {i+1}: {col}")
+                                if isinstance(col, dict):
+                                    self.log(f"     Keys: {list(col.keys())}")
+                            self.page.update()
+                            return
+                
+                except Exception as ex:
+                    last_error = str(ex)
+                    continue
+            
+            # Se chegou aqui, nenhum endpoint funcionou
+            if response:
+                self.log(f"❌ Erro ao carregar collections: {response.status_code}")
+                self.log(f"   {response.text[:200]}...")
+            else:
+                self.log(f"❌ Erro ao carregar collections: {last_error or 'Nenhum endpoint funcionou'}")
+            
+
+        
+        except Exception as ex:
+            self.log(f"❌ Erro ao carregar collections: {str(ex)}")
+            import traceback
+            self.log(traceback.format_exc())
+        
+        self.page.update()
+
+    async def fetch_models(self):
+        """Busca modelos disponíveis da API xAI."""
+        if not self.api_key:
+            self.log("⚠️ API Key não configurada. Configure a API Key para carregar modelos.")
+            return
+            
+        self.log("🔄 Buscando modelos disponíveis...")
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.get(
+                "https://api.x.ai/v1/models",
                 headers=headers,
                 timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
-                self.collections_list = data.get("collections", [])
+                models = data.get("data", [])
                 
-                # Atualiza dropdown
-                self.collections_dropdown.options = [
-                    ft.dropdown.Option(
-                        key=str(col["id"]),
-                        text=f"{col['name']} ({col['id'][:8]}...)"
-                    )
-                    for col in self.collections_list
-                ]
-                self.collections_dropdown.disabled = False
+                # Extrai IDs dos modelos
+                self.available_models = [model.get("id") for model in models if model.get("id")]
                 
-                self.log(f"✅ {len(self.collections_list)} collection(s) encontrada(s)")
+
+                
+                self.log(f"✅ {len(self.available_models)} modelo(s) encontrado(s)")
             else:
-                self.log(f"❌ Erro ao carregar collections: {response.status_code}")
+                self.log(f"❌ Erro ao buscar modelos: {response.status_code}")
                 self.log(f"   {response.text}")
-        
+                # Fallback para modelos padrão
+                self.available_models = ["grok-beta", "grok-2-1212", "grok-2-vision-1212", "grok-vision-beta"]
+                
         except Exception as ex:
-            self.log(f"❌ Erro ao carregar collections: {str(ex)}")
+            self.log(f"❌ Erro ao buscar modelos: {str(ex)}")
+            # Fallback para modelos padrão
+            self.available_models = ["grok-beta", "grok-2-1212", "grok-2-vision-1212", "grok-vision-beta"]
         
-        self.page.update()
-    
+
+
+    async def refresh_models_click(self, e):
+        """Callback para botão de atualizar modelos."""
+        await self.fetch_models()
+
     async def generate_md_files(self, e):
         """Gera arquivos MD a partir dos JSONs selecionados."""
         self.log("=" * 70)
@@ -726,4 +1027,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
