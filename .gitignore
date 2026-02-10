@@ -53,6 +53,7 @@ config.json
 sentencas_md_test/
 uploaded_files/
 md_output/
+MDs_output/
 *.json.txt
 
 # Temporary files
