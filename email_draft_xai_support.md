@@ -4,7 +4,7 @@
 
 **To:** support@x.ai  
 **CC:** sales@x.ai  
-**Subject:** Enterprise Support Request - Large-Scale Legal Collections Implementation (50M Tokens)
+**Subject:** URGENT: Processing Stuck + Enterprise Support Request - Large-Scale Legal Collections (50M Tokens)
 
 ---
 
@@ -76,20 +76,29 @@ I'm considering two approaches:
 - **Question:** Are there quotas for total chunks per Collection?
 - **Question:** Should I implement delays between batch uploads?
 
-### 4. Processing Monitoring & Current Issue
-**Current Situation:**
-- Test upload of 64 documents completed successfully via API
-- All documents showing "processing" status in Console for 30+ minutes
-- No error messages visible
-- Cannot yet perform searches on the Collection
+### 4. Processing Monitoring & ⚠️ URGENT Current Issue
 
-**Questions:**
-- **Question:** What is the normal processing time for 64 chunks (~1KB each)?
+**⚠️ IMMEDIATE CONCERN:**
+- **Test upload:** 64 documents uploaded successfully via API (all received HTTP 200 responses)
+- **Time elapsed:** 60+ minutes since upload completion
+- **Current status:** ALL 64 documents stuck in "processing" status
+- **Console behavior:** No error messages, no progress indicators
+- **Search capability:** Cannot search Collection yet (expected until processing completes)
+- **Expected time:** Based on documentation, 64 chunks should process in 30-45 minutes
+
+**URGENT Questions:**
+- **Question:** Is 60+ minutes normal for 64 small Markdown chunks (~1-2KB each)?
+- **Question:** Should I continue waiting, or is this a stuck/failed processing job?
+- **Question:** Is there a timeout after which I should re-upload?
+- **Question:** Can you check backend logs for Collection ID: collection_91555f79-facc-4ea7-a47b-e787ebd76896?
+
+**Additional Processing Questions:**
 - **Question:** Is there an API endpoint to check document processing status programmatically?
-- **Question:** At what point should I be concerned about processing timeouts?
-- **Question:** For the full 111K chunk dataset, what processing time should I realistically expect?
-- **Question:** If documents remain in "processing" status for extended periods (>2 hours), what should I do?
-- **Question:** Is there a way to monitor processing progress or queue position?
+- **Question:** At what point (hours) should I be concerned about processing timeouts?
+- **Question:** For the full 111K chunk dataset, what realistic processing time should I expect (hours/days)?
+- **Question:** If documents remain in "processing" indefinitely (>2-3 hours), what's the recovery process?
+- **Question:** Is there a way to monitor processing progress, queue position, or backend status?
+- **Question:** Are there processing capacity limits that might cause delays during peak hours?
 
 ### 5. Known Issues & Workarounds
 During testing, I encountered:
