@@ -1084,7 +1084,7 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
             f"numero_processo: {item['numero_processo']}",
             f"data_publicacao: {item['data_publicacao'] if item['data_publicacao'] else 'Não informada'}",
             f"tipo_acao: {item['tipo_acao']}",
-            f"keywords: {', '.join(keywords)}",
+            f"palavras-chave: {', '.join(keywords)}",
             "---",
             ""
         ]
@@ -1168,7 +1168,8 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
                     metadata, _ = self.split_front_matter(text_content)
                     if metadata is not None:
                         metadata = dict(metadata)
-                        metadata.setdefault("original_filename", basename)
+                        if "keywords" in metadata and "palavras-chave" not in metadata:
+                            metadata["palavras-chave"] = metadata.pop("keywords")
                     fields = metadata if metadata else None
                     data_payload = {
                         "name": safe_basename,
