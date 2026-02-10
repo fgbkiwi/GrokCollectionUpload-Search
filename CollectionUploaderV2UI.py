@@ -17,10 +17,11 @@ import os
 import re
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional, cast
+from typing import Dict, List, Any, Optional, Tuple, cast
 from datetime import datetime
 import requests
 import tkinter as tk
+import unicodedata
 from tkinter import filedialog
 
 
@@ -45,18 +46,13 @@ class CollectionUploaderV2UI:
         self.output_directory: str = ""
         self.management_key: str = ""
         self.api_key: str = ""
-        self.selected_model: str = "grok-beta"
+        self.selected_model: str = ""
         self.selected_collection_id: str = ""
         self.collections_list: List[Dict] = []
         self.generated_md_files: List[str] = []
         
-        # Modelos disponíveis
-        self.available_models = [
-            "grok-beta",
-            "grok-2-1212",
-            "grok-2-vision-1212",
-            "grok-vision-beta"
-        ]
+        # Modelos disponíveis (populado via refresh na API)
+        self.available_models: List[str] = []
         
         # Estatísticas
         self.stats = {
@@ -79,9 +75,39 @@ class CollectionUploaderV2UI:
         self.tk_root = None
         
         self.build_ui()
+
+        # Limpa log logo apos construir a UI
+        self.clear_log()
         
         # Carregar configuração salva (após UI construída)
         self.load_config()
+
+        # Atualiza models/collections no startup como se o usuario clicasse nos botoes
+        self.schedule_startup_refresh()
+
+    def schedule_startup_refresh(self):
+        """Agenda o refresh inicial de collections e modelos."""
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(self.refresh_on_startup)
+            else:
+                asyncio.create_task(self.refresh_on_startup())
+        except Exception:
+            # Evita falhas de inicializacao se o loop nao estiver pronto
+            pass
+
+    async def refresh_on_startup(self):
+        """Atualiza collections e modelos no startup."""
+        self.clear_log()
+        if self.management_key:
+            await self.load_collections(None)
+            self.update_collections_dropdown()
+
+        if self.api_key:
+            await self.fetch_models()
+            self.update_models_dropdown()
+
+        self.page.update()
     
     def load_config(self):
         """Carrega configuração salva do arquivo config.json."""
@@ -93,10 +119,15 @@ class CollectionUploaderV2UI:
                     # Preenche campos com valores salvos
                     self.management_key = config.get("management_key", "")
                     self.api_key = config.get("api_key", "")
-                    self.selected_model = config.get("selected_model", "grok-beta")
-                    
+                    self.selected_model = config.get("selected_model", "")
+                    # Collection selecionada anteriormente (se houver)
+                    self.selected_collection_id = config.get("selected_collection_id", "")
 
                 self.log("✅ Configuração carregada do arquivo config.json")
+
+                # Atualiza estado inicial dos botões baseado na config carregada
+                self.check_generate_button_state()
+                self.check_upload_button_state()
             else:
                 self.log("ℹ️ Arquivo de configuração não encontrado. Usando padrões.")
         except Exception as e:
@@ -108,7 +139,8 @@ class CollectionUploaderV2UI:
             config = {
                 "management_key": self.management_key,
                 "api_key": self.api_key,
-                "selected_model": self.selected_model
+                "selected_model": self.selected_model,
+                "selected_collection_id": self.selected_collection_id,
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
@@ -215,15 +247,14 @@ class CollectionUploaderV2UI:
         # Dropdown de Modelo no diálogo
         self.dialog_model_dropdown = ft.Dropdown(
             label="Modelo para Geração de Keywords",
-            hint_text="Selecione o modelo",
             options=[ft.dropdown.Option(model) for model in self.available_models],
             value=self.selected_model,
             width=300,
-            on_blur=self.on_dialog_model_change
+            on_select=self.on_dialog_model_change
         )
         
         # Botão para atualizar modelos no diálogo
-        self.dialog_refresh_models_btn = ft.ElevatedButton(
+        self.dialog_refresh_models_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Atualizar Modelos")]),
                 tight=True
@@ -232,18 +263,18 @@ class CollectionUploaderV2UI:
             disabled=len(self.api_key) == 0
         )
         
-        # Dropdown de Collections no diálogo
+        # Dropdown de Collections no diálogo (on_select garante que a seleção seja salva ao escolher)
         self.dialog_collections_dropdown = ft.Dropdown(
             label="Collection para Upload",
-            hint_text="Selecione a collection",
             options=[],
+            on_select=self.on_dialog_collection_change,
             on_blur=self.on_dialog_collection_change,
             disabled=True,
             width=450
         )
         
         # Botão para carregar Collections no diálogo
-        self.dialog_load_collections_btn = ft.ElevatedButton(
+        self.dialog_load_collections_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Carregar Collections")]),
                 tight=True
@@ -260,7 +291,7 @@ class CollectionUploaderV2UI:
         )
         
         # Botão de fechar
-        close_button = ft.ElevatedButton(
+        close_button = ft.Button(
             content=ft.Text("Fechar"),
             on_click=self.close_config_dialog
         )
@@ -293,20 +324,12 @@ class CollectionUploaderV2UI:
         # Atualiza valores dos campos do diálogo
         self.dialog_management_key_field.value = self.management_key
         self.dialog_api_key_field.value = self.api_key
-        self.dialog_model_dropdown.value = self.selected_model
+        self.update_models_dropdown()
         self.dialog_load_collections_btn.disabled = len(self.management_key) == 0
         self.dialog_refresh_models_btn.disabled = len(self.api_key) == 0
-        
-        # Atualiza dropdown de collections se houver dados
-        if self.collections_list:
-            self.dialog_collections_dropdown.options = [
-                ft.dropdown.Option(
-                    key=str(col.get("collection_id", "")),
-                    text=col.get("collection_name", str(col.get("collection_id", "")))
-                )
-                for col in self.collections_list
-            ]
-            self.dialog_collections_dropdown.disabled = False
+
+        # Atualiza dropdown de collections conforme estado atual
+        self.update_collections_dropdown()
         
         # Adiciona diálogo ao overlay apenas se não estiver já presente
         if self.config_dialog not in self.page.overlay:
@@ -317,6 +340,14 @@ class CollectionUploaderV2UI:
     def close_config_dialog(self, e):
         """Fecha o diálogo de configuração."""
         self.log("🗂️ Fechando diálogo de configuração...")
+        # Sincroniza a collection selecionada no dropdown para o estado da aplicação
+        # (evita que a seleção se perca se o usuário fechar sem tirar o foco do dropdown)
+        self.selected_collection_id = str(self.dialog_collections_dropdown.value or "")
+        if self.selected_collection_id:
+            self.log(f"   Collection selecionada: {self.selected_collection_id}")
+        # Garante que a seleção de collection seja persistida ao fechar
+        self.save_config()
+        self.check_upload_button_state()
         self.config_dialog.open = False
         self.page.update()
     
@@ -336,12 +367,14 @@ class CollectionUploaderV2UI:
     
     def on_dialog_model_change(self, e):
         """Callback quando modelo muda no diálogo."""
-        self.selected_model = str(e.control.value or "grok-beta")
+        self.selected_model = str(e.control.value or "")
         self.save_config()
     
     def on_dialog_collection_change(self, e):
         """Callback quando collection muda no diálogo."""
         self.selected_collection_id = str(e.control.value or "")
+        # Persiste imediatamente a collection escolhida
+        self.save_config()
         self.check_upload_button_state()
     
     def on_dark_mode_toggle(self, e):
@@ -361,45 +394,30 @@ class CollectionUploaderV2UI:
                 self.feedback_text.color = "#000000"
         self.page.update()
     
-    async def dialog_refresh_models_click(self, e):
+    def dialog_refresh_models_click(self, e):
         """Callback para botão de atualizar modelos no diálogo."""
+        self.log("🖱️ Clique em 'Atualizar Modelos' recebido...")
+        self.run_task(self._dialog_refresh_models)
+
+    async def _dialog_refresh_models(self):
         await self.fetch_models()
         # Atualiza dropdown no diálogo após buscar modelos
         if hasattr(self, 'dialog_model_dropdown'):
-            self.dialog_model_dropdown.options = [
-                ft.dropdown.Option(model_id) 
-                for model_id in self.available_models
-            ]
-            if self.selected_model not in self.available_models and self.available_models:
-                self.selected_model = self.available_models[0]
-            self.dialog_model_dropdown.value = self.selected_model
+            self.update_models_dropdown()
             self.page.update()
     
-    async def dialog_load_collections_click(self, e):
+    def dialog_load_collections_click(self, e):
         """Callback para botão de carregar collections no diálogo."""
         self.log("🔄 Iniciando carregamento de collections via diálogo...")
+        self.run_task(self._dialog_load_collections, e)
+
+    async def _dialog_load_collections(self, e):
         await self.load_collections(e)
         # Atualiza dropdown no diálogo após carregar collections
         self.log(f"📋 Verificando collections_list: {len(self.collections_list) if self.collections_list else 0} itens")
         try:
-            if self.collections_list:
-                self.log(f"📋 Atualizando dropdown com {len(self.collections_list)} collections")
-                options = [
-                    ft.dropdown.Option(
-                        key=str(col.get("collection_id", "")),
-                        text=str(col.get("collection_name", col.get("collection_id", "")))
-                    )
-                    for col in self.collections_list
-                ]
-                self.dialog_collections_dropdown.options = options
-                self.dialog_collections_dropdown.disabled = False
-                self.log(f"📋 Dropdown atualizado com {len(options)} opções")
-                self.page.update()
-            else:
-                self.log("⚠️ Nenhuma collection encontrada para atualizar dropdown")
-                self.dialog_collections_dropdown.options = []
-                self.dialog_collections_dropdown.disabled = True
-                self.page.update()
+            self.update_collections_dropdown()
+            self.page.update()
         except Exception as ex:
             self.log(f"❌ Erro ao atualizar dropdown: {str(ex)}")
             import traceback
@@ -411,7 +429,7 @@ class CollectionUploaderV2UI:
         """Cria a seção de seleção de arquivos e pasta de saída."""
         
         # Botão para selecionar JSON
-        self.json_picker_btn = ft.ElevatedButton(
+        self.json_picker_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.INSERT_DRIVE_FILE), ft.Text("Selecionar Arquivos JSON")]),
                 tight=True
@@ -428,7 +446,7 @@ class CollectionUploaderV2UI:
         )
         
         # Botão para selecionar pasta de saída
-        self.folder_picker_btn = ft.ElevatedButton(
+        self.folder_picker_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.FOLDER_OPEN), ft.Text("Selecionar Pasta de Saída")]),
                 tight=True
@@ -461,7 +479,7 @@ class CollectionUploaderV2UI:
         """Cria a seção de ações."""
         
         # Botão para gerar MDs
-        self.generate_md_btn = ft.ElevatedButton(
+        self.generate_md_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CREATE_NEW_FOLDER), ft.Text("Gerar Arquivos MD")]),
                 tight=True
@@ -473,7 +491,7 @@ class CollectionUploaderV2UI:
         )
         
         # Botão para fazer upload
-        self.upload_btn = ft.ElevatedButton(
+        self.upload_btn = ft.Button(
             content=ft.Row(
                 controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CLOUD_UPLOAD), ft.Text("Upload para Collection")]),
                 tight=True
@@ -508,13 +526,23 @@ class CollectionUploaderV2UI:
     
     async def pick_json_files(self, e):
         """Abre file picker para selecionar arquivos JSON."""
-        # Usar tkinter filedialog em thread separada para não bloquear
-        files = await asyncio.to_thread(
-            lambda: filedialog.askopenfilenames(
+        # Criar janela tkinter temporária e trazer para frente
+        def open_file_dialog():
+            root = tk.Tk()
+            root.withdraw()  # Esconder janela principal
+            root.attributes('-topmost', True)  # Trazer para frente
+            root.lift()
+            root.focus_force()
+            files = filedialog.askopenfilenames(
+                parent=root,
                 title="Selecione os arquivos JSON",
                 filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")]
             )
-        )
+            root.destroy()
+            return files
+        
+        # Usar tkinter filedialog em thread separada para não bloquear
+        files = await asyncio.to_thread(open_file_dialog)
 
         if files:
             self.selected_json_files = list(files)
@@ -546,18 +574,29 @@ class CollectionUploaderV2UI:
     
     async def pick_output_folder(self, e):
         """Abre folder picker para selecionar pasta de saída."""
-        # Usar tkinter filedialog em thread separada para não bloquear
-        path = await asyncio.to_thread(
-            lambda: filedialog.askdirectory(
+        # Criar janela tkinter temporária e trazer para frente
+        def open_folder_dialog():
+            root = tk.Tk()
+            root.withdraw()  # Esconder janela principal
+            root.attributes('-topmost', True)  # Trazer para frente
+            root.lift()
+            root.focus_force()
+            path = filedialog.askdirectory(
+                parent=root,
                 title="Selecione a pasta de saída"
             )
-        )
+            root.destroy()
+            return path
+        
+        # Usar tkinter filedialog em thread separada para não bloquear
+        path = await asyncio.to_thread(open_folder_dialog)
 
         if path:
             self.output_directory = str(path)
             self.output_folder_text.value = f"Pasta: {self.output_directory}"
             self.output_folder_text.color = "#388E3C"
             self.check_generate_button_state()
+            self.check_upload_button_state()
         else:
             self.output_directory = ""
             self.output_folder_text.value = "Nenhuma pasta selecionada"
@@ -572,6 +611,7 @@ class CollectionUploaderV2UI:
             self.output_folder_text.value = f"Pasta: {self.output_directory}"
             self.output_folder_text.color = "#388E3C"
             self.check_generate_button_state()
+            self.check_upload_button_state()
         else:
             self.output_directory = ""
             self.output_folder_text.value = "Nenhuma pasta selecionada"
@@ -591,11 +631,30 @@ class CollectionUploaderV2UI:
     
     def check_upload_button_state(self):
         """Verifica se o botão de upload pode ser habilitado."""
+        has_md_files = False
+        if self.output_directory:
+            try:
+                output_path = Path(self.output_directory)
+                has_md_files = output_path.exists() and any(output_path.glob("*.md"))
+            except Exception:
+                has_md_files = False
+
         can_upload = (
-            len(self.generated_md_files) > 0 and
+            (len(self.generated_md_files) > 0 or has_md_files) and
             len(self.selected_collection_id) > 0 and
             len(self.management_key) > 0
         )
+        # Log de debug para entender por que o botão está (des)habilitado
+        try:
+            self.log(
+                f"🔍 check_upload_button_state -> can_upload={can_upload} | "
+                f"generated_md_files={len(self.generated_md_files)} | "
+                f"selected_collection_id='{self.selected_collection_id}' | "
+                f"management_key_set={bool(self.management_key)}"
+            )
+        except Exception:
+            # Não queremos que um erro de log quebre a UI
+            pass
         self.upload_btn.disabled = not can_upload
         self.page.update()
     
@@ -606,18 +665,40 @@ class CollectionUploaderV2UI:
         if self.feedback_text:
             self.feedback_text.value += log_entry
             self.page.update()
+
+    def run_task(self, async_fn, *args):
+        """Executa uma coroutine sem bloquear a UI."""
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(async_fn, *args)
+            else:
+                asyncio.create_task(async_fn(*args))
+        except Exception:
+            pass
+
+    def clear_log(self):
+        """Limpa o log de execucao."""
+        if self.feedback_text:
+            self.feedback_text.value = ""
+            self.page.update()
     
-    async def load_collections_click(self, e):
+    def load_collections_click(self, e):
         """Ponte para chamada async."""
-        await self.load_collections(e)
+        # Feedback imediato ao clicar no botão
+        self.log("🖱️ Clique em 'Carregar Collections' recebido...")
+        self.run_task(self.load_collections, e)
 
-    async def generate_md_files_click(self, e):
+    def generate_md_files_click(self, e):
         """Ponte para chamada async."""
-        await self.generate_md_files(e)
+        # Feedback imediato ao clicar no botão
+        self.log("🖱️ Clique em 'Gerar Arquivos MD' recebido...")
+        self.run_task(self.generate_md_files, e)
 
-    async def upload_to_collection_click(self, e):
+    def upload_to_collection_click(self, e):
         """Ponte para chamada async."""
-        await self.upload_to_collection(e)
+        # Feedback imediato ao clicar no botão
+        self.log("🖱️ Clique em 'Upload para Collection' recebido...")
+        self.run_task(self.upload_to_collection, e)
 
     async def load_collections(self, e):
         """Carrega lista de collections disponíveis."""
@@ -732,17 +813,69 @@ class CollectionUploaderV2UI:
                 
 
                 
+                if self.available_models:
+                    if not self.selected_model or self.selected_model not in self.available_models:
+                        self.selected_model = self.available_models[0]
+                        self.save_config()
                 self.log(f"✅ {len(self.available_models)} modelo(s) encontrado(s)")
             else:
                 self.log(f"❌ Erro ao buscar modelos: {response.status_code}")
                 self.log(f"   {response.text}")
-                # Fallback para modelos padrão
-                self.available_models = ["grok-beta", "grok-2-1212", "grok-2-vision-1212", "grok-vision-beta"]
+                self.available_models = []
                 
         except Exception as ex:
             self.log(f"❌ Erro ao buscar modelos: {str(ex)}")
-            # Fallback para modelos padrão
-            self.available_models = ["grok-beta", "grok-2-1212", "grok-2-vision-1212", "grok-vision-beta"]
+            self.available_models = []
+
+    def update_models_dropdown(self):
+        """Sincroniza dropdown de modelos com a lista atual."""
+        if not hasattr(self, "dialog_model_dropdown"):
+            return
+
+        model_options = list(self.available_models)
+        if not model_options:
+            self.dialog_model_dropdown.options = []
+            self.dialog_model_dropdown.value = ""
+            return
+
+        if model_options and self.selected_model and self.selected_model not in model_options:
+            self.selected_model = ""
+
+        self.dialog_model_dropdown.options = [
+            ft.dropdown.Option(model_id) for model_id in model_options
+        ]
+
+        if not self.selected_model and model_options:
+            self.selected_model = model_options[0]
+
+        self.dialog_model_dropdown.value = self.selected_model
+
+    def update_collections_dropdown(self):
+        """Sincroniza dropdown de collections com a lista atual."""
+        if not hasattr(self, "dialog_collections_dropdown"):
+            return
+
+        options = []
+        if self.collections_list:
+            options = [
+                ft.dropdown.Option(
+                    key=str(col.get("collection_id", "")),
+                    text=str(col.get("collection_name", col.get("collection_id", "")))
+                )
+                for col in self.collections_list
+            ]
+
+        self.dialog_collections_dropdown.options = options
+        self.dialog_collections_dropdown.disabled = len(options) == 0
+
+        if options and self.selected_collection_id:
+            keys = {str(opt.key) for opt in options if opt.key is not None}
+            if self.selected_collection_id in keys:
+                self.dialog_collections_dropdown.value = self.selected_collection_id
+            else:
+                self.dialog_collections_dropdown.value = ""
+        elif not options:
+            self.dialog_collections_dropdown.value = ""
         
 
 
@@ -752,6 +885,9 @@ class CollectionUploaderV2UI:
 
     async def generate_md_files(self, e):
         """Gera arquivos MD a partir dos JSONs selecionados."""
+        if not self.selected_model:
+            self.log("⚠️ Nenhum modelo selecionado. Abra as Configurações e escolha um modelo para geração de keywords.")
+            return
         self.log("=" * 70)
         self.log("🚀 Iniciando geração de arquivos MD...")
         
@@ -932,6 +1068,12 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
         text = re.sub(r'[<>:"/\\|?*]', '', text)
         text = re.sub(r'[\s\-—]+', '_', text)
         return text[:100]
+
+    def to_ascii_filename(self, text: str) -> str:
+        """Converte nome de arquivo para ASCII seguro."""
+        normalized = unicodedata.normalize("NFKD", text)
+        ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+        return self.sanitize_filename(ascii_text) or "document.md"
     
     def create_metadata_header(self, item: Dict[str, Any], keywords: List[str]) -> str:
         """Cria cabeçalho de metadados."""
@@ -947,6 +1089,31 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
             ""
         ]
         return "\n".join(metadata_lines)
+
+    def split_front_matter(self, text: str) -> Tuple[Dict[str, str], str]:
+        """Separa front matter YAML simples do corpo do texto."""
+        if not text.startswith("---"):
+            return {}, text
+
+        lines = text.splitlines()
+        if len(lines) < 3:
+            return {}, text
+
+        metadata: Dict[str, str] = {}
+        end_index = None
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                end_index = i
+                break
+            if ":" in lines[i]:
+                key, value = lines[i].split(":", 1)
+                metadata[key.strip()] = value.strip()
+
+        if end_index is None:
+            return {}, text
+
+        content = "\n".join(lines[end_index + 1:]).lstrip()
+        return metadata, content
     
     def print_statistics(self):
         """Imprime estatísticas."""
@@ -960,7 +1127,11 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
         self.log("=" * 70)
     
     async def upload_to_collection(self, e):
-        """Faz upload dos arquivos MD para a Collection."""
+        """Faz upload dos arquivos MD para a Collection.
+        Fluxo conforme documentação xAI: envio direto de documento com content + metadata."""
+        if not self.selected_collection_id:
+            self.log("⚠️ Nenhuma Collection selecionada. Abra as Configurações e escolha uma Collection antes de fazer upload.")
+            return
         self.log("\n" + "=" * 70)
         self.log("☁️ Iniciando upload para Collection...")
         
@@ -968,37 +1139,61 @@ Exemplo: horas_extras, clt, adicional_noturno, art_71, sumula_437"""
         self.upload_btn.disabled = True
         self.page.update()
         
+        base_url = "https://management-api.x.ai/v1"
+        headers = {
+            "Authorization": f"Bearer {self.management_key}"
+        }
+        
+        uploaded = 0
+        failed = 0
+        
         try:
-            headers = {
-                "Authorization": f"Bearer {self.management_key}"
-            }
-            
-            uploaded = 0
-            failed = 0
-            
-            for md_file in self.generated_md_files:
+            if not self.generated_md_files and self.output_directory:
+                output_path = Path(self.output_directory)
+                if output_path.exists():
+                    self.generated_md_files = [str(p) for p in output_path.glob("*.md")]
+
+            if not self.generated_md_files:
+                self.log("⚠️ Nenhum arquivo MD encontrado para upload.")
+                return
+
+            for idx, md_file in enumerate(self.generated_md_files):
                 try:
+                    basename = os.path.basename(md_file)
+                    safe_basename = self.to_ascii_filename(basename)
                     with open(md_file, 'rb') as f:
-                        files = {
-                            'file': (os.path.basename(md_file), f, 'text/markdown')
-                        }
-                        
-                        response = requests.post(
-                            f"https://api.x.ai/v1/collections/{self.selected_collection_id}/files",
-                            headers=headers,
-                            files=files,
-                            timeout=30
-                        )
-                        
-                        if response.status_code in [200, 201]:
-                            uploaded += 1
-                        else:
-                            failed += 1
-                            self.log(f"❌ Falha no upload de {os.path.basename(md_file)}: {response.status_code}")
+                        file_bytes = f.read()
+
+                    text_content = file_bytes.decode("utf-8", errors="ignore")
+                    metadata, _ = self.split_front_matter(text_content)
+                    if metadata is not None:
+                        metadata = dict(metadata)
+                        metadata.setdefault("original_filename", basename)
+                    fields = metadata if metadata else None
+                    data_payload = {
+                        "name": safe_basename,
+                        "content_type": "text/markdown"
+                    }
+                    if fields:
+                        data_payload["fields"] = json.dumps(fields, ensure_ascii=False)
+
+                    resp = requests.post(
+                        f"{base_url}/collections/{self.selected_collection_id}/documents",
+                        headers=headers,
+                        data=data_payload,
+                        files={"data": (safe_basename, file_bytes, "text/markdown")},
+                        timeout=60
+                    )
+
+                    if resp.status_code in [200, 201]:
+                        uploaded += 1
+                    else:
+                        failed += 1
+                        self.log(f"❌ Falha no upload de {os.path.basename(md_file)}: {resp.status_code} - {resp.text[:200]}")
                     
-                    if uploaded % 10 == 0:
-                        self.log(f"⏳ Uploaded: {uploaded}/{len(self.generated_md_files)}")
-                        await asyncio.sleep(0.1)
+                    if (uploaded + failed) % 10 == 0:
+                        self.log(f"⏳ Processados: {uploaded + failed}/{len(self.generated_md_files)}")
+                    await asyncio.sleep(0.1)
                 
                 except Exception as ex:
                     failed += 1
@@ -1027,4 +1222,8 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    try:
+        ft.run(main)
+    except (KeyboardInterrupt, RuntimeError):
+        # Suppress expected errors when closing application
+        pass
