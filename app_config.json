@@ -1,9 +1,0 @@
-{
-  "management_key": "xai-token-pIUKlAwUe8sjzneN2973f1cCxaqn75itL6RRIw2jsWjCJwWgkMEdIK4Sp2MC8o1qaxxYA8S9Rl6Zmkmh",
-  "api_key": "xai-q25ZluJh9t4sXIFo3GQyGBvJ91Hd4vtmMUWzPiyxIWr8EN8XtPJls3eWlhVb3VXjyaFwRW5049GONO6M",
-  "model": "grok-4-1-fast-reasoning",
-  "temperature": 0.1,
-  "system_prompt": "Você é um assistente jurídico especializado em Direito do Trabalho brasileiro. Analise precedentes e fundamente respostas com base na CLT, jurisprudência e doutrina trabalhista.",
-  "theme_dark": false,
-  "selected_collection_id": "collection_91555f79-facc-4ea7-a47b-e787ebd76896"
-}
