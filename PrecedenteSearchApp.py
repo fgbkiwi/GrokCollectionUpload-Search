@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pyperclip
+import tkinter as tk
+from tkinter import filedialog
 
 
 class ConfigManager:
@@ -521,23 +523,35 @@ class PrecedenteSearchApp:
     
     async def attach_file(self, e):
         """Anexa um arquivo."""
-        file_picker = ft.FilePicker()
-        self.page.overlay.append(file_picker)
-        self.page.update()
+        # Criar janela tkinter temporária e trazer para frente
+        def open_file_dialog():
+            root = tk.Tk()
+            root.withdraw()  # Esconder janela principal
+            root.attributes('-topmost', True)  # Trazer para frente
+            root.lift()
+            root.focus_force()
+            files = filedialog.askopenfilenames(
+                parent=root,
+                title="Selecione os arquivos para anexar",
+                filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md"), ("All files", "*.*")]
+            )
+            root.destroy()
+            return files
         
         try:
-            files = await file_picker.pick_files(allow_multiple=True)
+            # Usar tkinter filedialog em thread separada para não bloquear
+            files = await asyncio.to_thread(open_file_dialog)
+            
             if files:
-                for file in files:
-                    if file.path:
-                        self.attached_files.append(str(file.path))
-                        self.add_system_message(f"📎 Arquivo anexado: {file.name}")
+                for file_path in files:
+                    if file_path:
+                        self.attached_files.append(str(file_path))
+                        file_name = os.path.basename(file_path)
+                        self.add_system_message(f"📎 Arquivo anexado: {file_name}")
                 self.page.update()
         except Exception as ex:
             print(f"Erro ao anexar arquivo: {ex}")
-        finally:
-            self.page.overlay.remove(file_picker)
-            self.page.update()
+            self.add_system_message(f"❌ Erro ao anexar arquivo: {ex}")
     
     async def send_message_click(self, e):
         """Ponte para chamada async."""
