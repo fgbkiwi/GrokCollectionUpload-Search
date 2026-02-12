@@ -210,6 +210,8 @@ GrokCollectionUpload-Search/
 
 ## 📚 Documentação
 
+Style guideline: usamos inicialização por atribuição de propriedades em widgets Flet para evitar incompatibilidades com type stubs do Pylance.
+
 - **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Guia completo de uso
 - **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testes e diagnósticos
 - **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - Instruções para AI agents

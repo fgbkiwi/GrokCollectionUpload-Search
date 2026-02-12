@@ -152,24 +152,23 @@ class CollectionUploaderV2UI:
         """Constrói a interface do usuário."""
         
         # Título com ícone de configuração
+        title_text = ft.Text()
+        title_text.value = "Collection Uploader V2 - xAI (Upload Direto)"
+        title_text.size = 28
+        title_text.weight = ft.FontWeight.BOLD
+        title_text.color = "#1976D2"
+        title_text.expand = True
+
+        settings_button = ft.IconButton()
+        settings_button.icon = ft.Icons.SETTINGS
+        settings_button.icon_size = 30
+        settings_button.icon_color = "#1976D2"
+        settings_button.tooltip = "Configurações"
+        settings_button.on_click = self.open_config_dialog
+
         title_row = ft.Row(
-            controls=[
-                ft.Text(
-                    "Collection Uploader V2 - xAI (Upload Direto)",
-                    size=28,
-                    weight=ft.FontWeight.BOLD,
-                    color="#1976D2",
-                    expand=True
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.SETTINGS,
-                    icon_size=30,
-                    icon_color="#1976D2",
-                    tooltip="Configurações",
-                    on_click=self.open_config_dialog
-                )
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+            controls=[title_text, settings_button],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
         
         # Seção de Seleção de Arquivos (renomeada)
@@ -187,18 +186,17 @@ class CollectionUploaderV2UI:
             feedback_bgcolor = "#f5f5f5"
             feedback_color = "#000000"
 
-        self.feedback_text = ft.TextField(
-            label="Log de Execução",
-            multiline=True,
-            read_only=True,
-            min_lines=10,
-            max_lines=15,
-            bgcolor=feedback_bgcolor,
-            color=feedback_color,
-            border_color="#42A5F5",
-            expand=True,
-            width=960  # Fixed width to avoid None arithmetic
-        )
+        self.feedback_text = ft.TextField()
+        self.feedback_text.label = "Log de Execução"
+        self.feedback_text.multiline = True
+        self.feedback_text.read_only = True
+        self.feedback_text.min_lines = 10
+        self.feedback_text.max_lines = 15
+        self.feedback_text.bgcolor = feedback_bgcolor
+        self.feedback_text.color = feedback_color
+        self.feedback_text.border_color = "#42A5F5"
+        self.feedback_text.expand = True
+        self.feedback_text.width = 960  # Fixed width to avoid None arithmetic
         
         # Layout principal
         self.page.add(
@@ -224,39 +222,36 @@ class CollectionUploaderV2UI:
     def create_config_dialog(self):
         """Cria o diálogo de configuração."""
         # Campos para o diálogo
-        self.dialog_management_key_field = ft.TextField(
-            label="Management Key (xAI Collection)",
-            hint_text="Chave de gerenciamento da Collection",
-            password=True,
-            can_reveal_password=True,
-            width=450,
-            value=self.management_key,
-            on_change=self.on_dialog_management_key_change
-        )
+        self.dialog_management_key_field = ft.TextField()
+        self.dialog_management_key_field.label = "Management Key (xAI Collection)"
+        self.dialog_management_key_field.hint_text = "Chave de gerenciamento da Collection"
+        self.dialog_management_key_field.password = True
+        self.dialog_management_key_field.can_reveal_password = True
+        self.dialog_management_key_field.width = 450
+        self.dialog_management_key_field.value = self.management_key
+        self.dialog_management_key_field.on_change = self.on_dialog_management_key_change  # type: ignore[attr-defined]
         
-        self.dialog_api_key_field = ft.TextField(
-            label="API Key (Grok)",
-            hint_text="Chave de API do Grok para geração de keywords",
-            password=True,
-            can_reveal_password=True,
-            width=450,
-            value=self.api_key,
-            on_change=self.on_dialog_api_key_change
-        )
+        self.dialog_api_key_field = ft.TextField()
+        self.dialog_api_key_field.label = "API Key (Grok)"
+        self.dialog_api_key_field.hint_text = "Chave de API do Grok para geração de keywords"
+        self.dialog_api_key_field.password = True
+        self.dialog_api_key_field.can_reveal_password = True
+        self.dialog_api_key_field.width = 450
+        self.dialog_api_key_field.value = self.api_key
+        self.dialog_api_key_field.on_change = self.on_dialog_api_key_change  # type: ignore[attr-defined]
         
         # Dropdown de Modelo no diálogo
-        self.dialog_model_dropdown = ft.Dropdown(
-            label="Modelo para Geração de Keywords",
-            options=[ft.dropdown.Option(model) for model in self.available_models],
-            value=self.selected_model,
-            width=300,
-            on_select=self.on_dialog_model_change
-        )
+        self.dialog_model_dropdown = ft.Dropdown()
+        self.dialog_model_dropdown.label = "Modelo para Geração de Keywords"
+        self.dialog_model_dropdown.options = [ft.dropdown.Option(model) for model in self.available_models]
+        self.dialog_model_dropdown.value = self.selected_model
+        self.dialog_model_dropdown.width = 300
+        self.dialog_model_dropdown.on_change = self.on_dialog_model_change  # type: ignore[attr-defined]
         
         # Botão para atualizar modelos no diálogo
         self.dialog_refresh_models_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Atualizar Modelos")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.REFRESH), ft.Text(value="Atualizar Modelos")]),
                 tight=True
             ),
             on_click=self.dialog_refresh_models_click,
@@ -264,19 +259,18 @@ class CollectionUploaderV2UI:
         )
         
         # Dropdown de Collections no diálogo (on_select garante que a seleção seja salva ao escolher)
-        self.dialog_collections_dropdown = ft.Dropdown(
-            label="Collection para Upload",
-            options=[],
-            on_select=self.on_dialog_collection_change,
-            on_blur=self.on_dialog_collection_change,
-            disabled=True,
-            width=450
-        )
+        self.dialog_collections_dropdown = ft.Dropdown()
+        self.dialog_collections_dropdown.label = "Collection para Upload"
+        self.dialog_collections_dropdown.options = []
+        self.dialog_collections_dropdown.on_change = self.on_dialog_collection_change  # type: ignore[attr-defined]
+        self.dialog_collections_dropdown.on_blur = self.on_dialog_collection_change  # type: ignore[attr-defined]
+        self.dialog_collections_dropdown.disabled = True
+        self.dialog_collections_dropdown.width = 450
         
         # Botão para carregar Collections no diálogo
         self.dialog_load_collections_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.REFRESH), ft.Text("Carregar Collections")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.REFRESH), ft.Text(value="Carregar Collections")]),
                 tight=True
             ),
             on_click=self.dialog_load_collections_click,
@@ -284,11 +278,10 @@ class CollectionUploaderV2UI:
         )
         
         # Toggle para Dark Mode
-        self.dark_mode_toggle = ft.Switch(
-            label="Dark Mode",
-            value=self.dark_mode,
-            on_change=self.on_dark_mode_toggle
-        )
+        self.dark_mode_toggle = ft.Switch()
+        self.dark_mode_toggle.label = "Dark Mode"
+        self.dark_mode_toggle.value = self.dark_mode
+        self.dark_mode_toggle.on_change = self.on_dark_mode_toggle  # type: ignore[attr-defined]
         
         # Botão de fechar
         close_button = ft.Button(
@@ -312,12 +305,11 @@ class CollectionUploaderV2UI:
             ft.Row([self.dark_mode_toggle], spacing=10)
         ], spacing=15, width=600)
 
-        self.config_dialog = ft.AlertDialog(
-            modal=False,
-            title=ft.Text("Configurações"),
-            content=dialog_content,
-            actions=[close_button]
-        )
+        self.config_dialog = ft.AlertDialog()
+        self.config_dialog.modal = False
+        self.config_dialog.title = ft.Text("Configurações")
+        self.config_dialog.content = dialog_content
+        self.config_dialog.actions = [close_button]
     
     def open_config_dialog(self, e):
         """Abre o diálogo de configuração."""
@@ -431,7 +423,7 @@ class CollectionUploaderV2UI:
         # Botão para selecionar JSON
         self.json_picker_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.INSERT_DRIVE_FILE), ft.Text("Selecionar Arquivos JSON")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.INSERT_DRIVE_FILE), ft.Text(value="Selecionar Arquivos JSON")]),
                 tight=True
             ),
             on_click=self.pick_json_files,
@@ -448,7 +440,7 @@ class CollectionUploaderV2UI:
         # Botão para selecionar pasta de saída
         self.folder_picker_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.FOLDER_OPEN), ft.Text("Selecionar Pasta de Saída")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.FOLDER_OPEN), ft.Text(value="Selecionar Pasta de Saída")]),
                 tight=True
             ),
             on_click=self.pick_output_folder,
@@ -481,7 +473,7 @@ class CollectionUploaderV2UI:
         # Botão para gerar MDs
         self.generate_md_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CREATE_NEW_FOLDER), ft.Text("Gerar Arquivos MD")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.CREATE_NEW_FOLDER), ft.Text(value="Gerar Arquivos MD")]),
                 tight=True
             ),
             on_click=self.generate_md_files_click,
@@ -493,7 +485,7 @@ class CollectionUploaderV2UI:
         # Botão para fazer upload
         self.upload_btn = ft.Button(
             content=ft.Row(
-                controls=cast(List[ft.Control], [ft.Icon(ft.Icons.CLOUD_UPLOAD), ft.Text("Upload para Collection")]),
+                controls=cast(List[ft.Control], [ft.Icon(icon=ft.Icons.CLOUD_UPLOAD), ft.Text(value="Upload para Collection")]),
                 tight=True
             ),
             on_click=self.upload_to_collection_click,

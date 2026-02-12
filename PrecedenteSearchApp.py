@@ -194,6 +194,20 @@ class XAIClient:
                     return data["data"]
                 if isinstance(data.get("results"), list):
                     return data["results"]
+                if isinstance(data.get("matches"), list):
+                    normalized = []
+                    for match in data["matches"]:
+                        if not isinstance(match, dict):
+                            continue
+                        doc = match.get("document") if isinstance(match.get("document"), dict) else match
+                        if isinstance(doc, dict):
+                            item = dict(doc)
+                            if "document_id" not in item and "id" in item:
+                                item["document_id"] = item.get("id")
+                            if "score" not in item and "score" in match:
+                                item["score"] = match.get("score")
+                            normalized.append(item)
+                    return normalized
                 nested = data.get("data")
                 if isinstance(nested, dict):
                     if isinstance(nested.get("results"), list):
@@ -293,28 +307,38 @@ class PrecedenteSearchApp:
     def create_ui(self):
         """Cria a interface do usuário."""
         # Toolbar
+        toolbar_bg = "#333333" if self.config_manager.get("theme_dark") else "#f5f5f5"
+        toolbar_icon_color = "#ffffff" if self.config_manager.get("theme_dark") else "#1a1a1a"
+        clear_button = ft.IconButton()
+        clear_button.icon = ft.Icons.DELETE_SWEEP
+        clear_button.icon_color = toolbar_icon_color
+        clear_button.tooltip = "Limpar chat"
+        clear_button.on_click = self.clear_chat
+
+        copy_button = ft.IconButton()
+        copy_button.icon = ft.Icons.COPY_ALL
+        copy_button.icon_color = toolbar_icon_color
+        copy_button.tooltip = "Copiar chat"
+        copy_button.on_click = self.copy_chat
+
+        attach_button = ft.IconButton()
+        attach_button.icon = ft.Icons.ATTACH_FILE
+        attach_button.icon_color = toolbar_icon_color
+        attach_button.tooltip = "Anexar arquivo"
+        attach_button.on_click = self.attach_file
+
+        settings_button = ft.IconButton()
+        settings_button.icon = ft.Icons.SETTINGS
+        settings_button.icon_color = toolbar_icon_color
+        settings_button.tooltip = "Configurações"
+        settings_button.on_click = self.open_settings
+
         self.toolbar = ft.Row(
             controls=[
-                ft.IconButton(
-                    icon=ft.Icons.DELETE_SWEEP,
-                    tooltip="Limpar chat",
-                    on_click=self.clear_chat
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.COPY_ALL,
-                    tooltip="Copiar chat",
-                    on_click=self.copy_chat
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.ATTACH_FILE,
-                    tooltip="Anexar arquivo",
-                    on_click=self.attach_file
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.SETTINGS,
-                    tooltip="Configurações",
-                    on_click=self.open_settings
-                ),
+                clear_button,
+                copy_button,
+                attach_button,
+                settings_button,
             ],
             alignment=ft.MainAxisAlignment.START,
         )
@@ -328,44 +352,55 @@ class PrecedenteSearchApp:
         )
         
         # Collection selection
-        self.collection_dropdown = ft.Dropdown(
-            label="Collection",
-            options=[],
-            on_select=self.on_collection_changed,
-            on_blur=self.on_collection_changed,
-            expand=True,
-        )
+        self.collection_dropdown = ft.Dropdown()
+        self.collection_dropdown.label = "Collection"
+        self.collection_dropdown.options = []
+        self.collection_dropdown.on_change = self.on_collection_changed  # type: ignore[attr-defined]
+        self.collection_dropdown.on_blur = self.on_collection_changed  # type: ignore[attr-defined]
+        self.collection_dropdown.expand = True
 
-        self.collection_refresh_button = ft.IconButton(
-            icon=ft.Icons.REFRESH,
-            tooltip="Atualizar collections",
-            on_click=self.refresh_collections_click,
-        )
+        self.collection_refresh_button = ft.IconButton()
+        self.collection_refresh_button.icon = ft.Icons.REFRESH
+        self.collection_refresh_button.tooltip = "Atualizar collections"
+        self.collection_refresh_button.on_click = self.refresh_collections_click
 
-        self.collection_search_toggle = ft.Switch(
-            label="Buscar na collection",
-            value=True,
-        )
+        self.collection_search_toggle = ft.Switch()
+        self.collection_search_toggle.label = "Buscar na collection"
+        self.collection_search_toggle.value = True
 
-        self.collection_status_text = ft.Text("", size=12, color="grey")
+        self.collection_status_text = ft.Text()
+        self.collection_status_text.value = ""
+        self.collection_status_text.size = 12
+        self.collection_status_text.color = "grey"
         
         
         # Input
-        self.message_input = ft.TextField(
-            multiline=True,
-            min_lines=2,
-            max_lines=5,
-            expand=True,
-            on_submit=self.send_message_click,
-        )
+        self.message_input = ft.TextField()
+        self.message_input.multiline = True
+        self.message_input.min_lines = 2
+        self.message_input.max_lines = 5
+        self.message_input.expand = True
+        self.message_input.on_submit = self.send_message_click  # type: ignore[attr-defined]
         
+        send_button_controls: List[ft.Control] = [
+            ft.Icon(icon=ft.Icons.SEND),
+            ft.Text(value="Enviar"),
+        ]
         self.send_button = ft.ElevatedButton(
-            content=ft.Row([ft.Icon(ft.Icons.SEND), ft.Text("Enviar")], tight=True),
+            content=ft.Row(controls=send_button_controls, tight=True),
             on_click=self.send_message_click,
         )
 
-        self.response_status_ring = ft.ProgressRing(width=16, height=16, stroke_width=2, visible=False)
-        self.response_status_text = ft.Text("", size=12, color="grey")
+        self.response_status_ring = ft.ProgressRing()
+        self.response_status_ring.width = 16
+        self.response_status_ring.height = 16
+        self.response_status_ring.stroke_width = 2
+        self.response_status_ring.visible = False
+
+        self.response_status_text = ft.Text()
+        self.response_status_text.value = ""
+        self.response_status_text.size = 12
+        self.response_status_text.color = "grey"
         self.response_status_row = ft.Row(
             controls=[self.response_status_ring, self.response_status_text],
             spacing=6,
@@ -390,7 +425,7 @@ class PrecedenteSearchApp:
         
         main_layout = ft.Column(
             controls=[
-                ft.Container(content=self.toolbar, bgcolor="#333333", padding=10),
+                ft.Container(content=self.toolbar, bgcolor=toolbar_bg, padding=10),
                 self.chat_container,
                 ft.Divider(height=1),
                 ft.Container(content=collection_controls, padding=10),
@@ -473,10 +508,10 @@ class PrecedenteSearchApp:
     
     def add_message(self, content: str, is_user: bool = True):
         """Adiciona mensagem ao chat."""
-        row_controls = [
-            ft.Icon(ft.Icons.PERSON if is_user else ft.Icons.SMART_TOY, size=20),
-            ft.Text("Você" if is_user else "Grok", weight=ft.FontWeight.BOLD, size=14),
-            ft.Text(datetime.now().strftime("%H:%M"), size=12, color="grey"),
+        row_controls: List[ft.Control] = [
+            ft.Icon(icon=ft.Icons.PERSON if is_user else ft.Icons.SMART_TOY, size=20),
+            ft.Text(value="Você" if is_user else "Grok", weight=ft.FontWeight.BOLD, size=14),
+            ft.Text(value=datetime.now().strftime("%H:%M"), size=12, color="grey"),
         ]
         message_card = ft.Card(
             content=ft.Container(
@@ -565,6 +600,27 @@ class PrecedenteSearchApp:
         
         self.add_message(user_message, is_user=True)
         self.message_input.value = ""
+        self.response_status_text.value = "Preparando consulta..."
+        self.response_status_ring.visible = True
+        typing_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            controls=[
+                                ft.Icon(icon=ft.Icons.SMART_TOY, size=20),
+                                ft.Text(value="Grok", weight=ft.FontWeight.BOLD, size=14),
+                                ft.Text(value=datetime.now().strftime("%H:%M"), size=12, color="grey"),
+                            ]
+                        ),
+                        ft.Text(value="digitando..."),
+                    ]
+                ),
+                padding=15,
+            ),
+            elevation=2,
+        )
+        self.chat_container.controls.append(typing_card)
         self.page.update()
         
         messages = [{"role": "system", "content": str(self.config_manager.get("system_prompt") or "")}]
@@ -579,7 +635,11 @@ class PrecedenteSearchApp:
 
         collection_id = str(self.collection_dropdown.value or "")
         if self.collection_search_toggle.value and self.xai_client and collection_id:
-            results = self.xai_client.search_documents(user_message, collection_id)
+            results = await asyncio.to_thread(
+                self.xai_client.search_documents,
+                user_message,
+                collection_id,
+            )
             if results:
                 snippets = []
                 for idx, item in enumerate(results[:5], start=1):
@@ -611,10 +671,11 @@ class PrecedenteSearchApp:
             if not self.xai_client:
                 raise Exception("Cliente não inicializado")
 
-            response = self.xai_client.chat_completion(
-                messages=messages,
-                model=str(self.config_manager.get("model") or "grok-2-1212"),
-                temperature=float(self.config_manager.get("temperature") or 0.7),
+            response = await asyncio.to_thread(
+                self.xai_client.chat_completion,
+                messages,
+                str(self.config_manager.get("model") or "grok-2-1212"),
+                float(self.config_manager.get("temperature") or 0.7),
             )
             ans = str(response["choices"][0]["message"]["content"])
             self.add_message(ans, is_user=False)
@@ -622,6 +683,8 @@ class PrecedenteSearchApp:
         except Exception as ex:
             self.add_system_message(f"❌ Erro: {ex}")
         finally:
+            if typing_card in self.chat_container.controls:
+                self.chat_container.controls.remove(typing_card)
             self.chat_container.controls.remove(loading)
             self.response_status_text.value = ""
             self.response_status_ring.visible = False
@@ -629,18 +692,40 @@ class PrecedenteSearchApp:
     
     def open_settings(self, e):
         """Abre o diálogo de configurações."""
-        m_key = ft.TextField(label="Management Key", value=str(self.config_manager.get("management_key") or ""), password=True, can_reveal_password=True)
-        a_key = ft.TextField(label="API Key", value=str(self.config_manager.get("api_key") or ""), password=True, can_reveal_password=True)
-        model = ft.Dropdown(label="Modelo", value=str(self.config_manager.get("model") or ""), options=[])
+        m_key = ft.TextField()
+        m_key.label = "Management Key"
+        m_key.value = str(self.config_manager.get("management_key") or "")
+        m_key.password = True
+        m_key.can_reveal_password = True
+
+        a_key = ft.TextField()
+        a_key.label = "API Key"
+        a_key.value = str(self.config_manager.get("api_key") or "")
+        a_key.password = True
+        a_key.can_reveal_password = True
+        model = ft.Dropdown()
+        model.label = "Modelo"
+        model.value = str(self.config_manager.get("model") or "")
+        model.options = []
         model_status = ft.Text("Clique para atualizar modelos.", size=12, color="grey")
         refresh_models_button = ft.IconButton(
             icon=ft.Icons.REFRESH,
             tooltip="Atualizar modelos",
             on_click=lambda e: self.refresh_models(model, model_status),
         )
-        temp = ft.Slider(min=0, max=2, divisions=20, value=float(self.config_manager.get("temperature") or 0.7), label="Temp: {value}")
-        sys_p = ft.TextField(label="System Prompt", value=str(self.config_manager.get("system_prompt") or ""), multiline=True)
-        theme = ft.Switch(label="Tema Escuro", value=bool(self.config_manager.get("theme_dark")))
+        temp = ft.Slider()
+        temp.min = 0
+        temp.max = 2
+        temp.divisions = 20
+        temp.value = float(self.config_manager.get("temperature") or 0.7)
+        temp.label = "Temp: {value}"
+        sys_p = ft.TextField()
+        sys_p.label = "System Prompt"
+        sys_p.value = str(self.config_manager.get("system_prompt") or "")
+        sys_p.multiline = True
+        theme = ft.Switch()
+        theme.label = "Tema Escuro"
+        theme.value = bool(self.config_manager.get("theme_dark"))
         
         def save(e):
             self.config_manager.set("management_key", m_key.value)
@@ -655,11 +740,23 @@ class PrecedenteSearchApp:
             self.close_dialog(dlg)
             self.page.update()
             
-        dlg = ft.AlertDialog(
-            title=ft.Text("Configurações"),
-            content=ft.Column([m_key, a_key, ft.Row([model, refresh_models_button], spacing=10), model_status, ft.Text("Temperature:"), temp, sys_p, theme], scroll=ft.ScrollMode.AUTO, height=400),
-            actions=[ft.ElevatedButton(content=ft.Text("Salvar"), on_click=save)]
+        dlg = ft.AlertDialog()
+        dlg.title = ft.Text("Configurações")
+        dlg.content = ft.Column(
+            [
+                m_key,
+                a_key,
+                ft.Row([model, refresh_models_button], spacing=10),
+                model_status,
+                ft.Text("Temperature:"),
+                temp,
+                sys_p,
+                theme,
+            ],
+            scroll=ft.ScrollMode.AUTO,
+            height=400,
         )
+        dlg.actions = [ft.ElevatedButton(content=ft.Text("Salvar"), on_click=save)]
         self.open_dialog(dlg)
         self.update_xai_client()
         self.refresh_models(model, model_status)
