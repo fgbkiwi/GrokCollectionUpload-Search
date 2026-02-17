@@ -1,4 +1,4 @@
-# 🧪 Guia de Testes e Diagnósticos
+# 🧪 Guia de Testes e Diagnosticos
 
 **Guia completo para testes, validação e diagnósticos do sistema**
 
@@ -29,70 +29,72 @@
 **Objetivo**: Verificar se credenciais e Collections são carregadas corretamente.
 
 ```bash
-# Executar UI
-python CollectionUploaderV2UI.py
+# Executar geracao de MD
+python MD_GenerationV3.py
 ```
 
 **Passos**:
 1. Abrir ⚙️ Configurações
 2. Preencher Management Key e API Key
-3. Clicar em "Carregar Collections"
-4. Verificar dropdown de Collections populado
-5. Selecionar modelo Grok
-6. Fechar e reabrir app
-7. Verificar se configurações foram salvas
+3. Selecionar modelo Grok
+4. Fechar e reabrir app
+5. Verificar se configuracoes foram salvas
 
 **Resultado esperado**:
 - ✅ Collections listadas no dropdown
 - ✅ Credenciais restauradas após reinício
 - ✅ Logs mostram: `[HH:MM:SS] ✅ X Collection(s) encontrada(s)`
 
-### Teste 2: Geração de Markdown
+### Teste 2: Geracao de Markdown
 
 **Objetivo**: Validar geração de keywords e arquivos .md.
 
 **Passos**:
 1. Selecionar arquivo JSON de teste
 2. Selecionar diretório de saída
-3. Clicar em "1. Gerar Arquivos MD"
+3. (Opcional) Marcar "do not chunk JSON objects"
+4. Clicar em "Gerar Arquivos MD"
 4. Observar progresso em tempo real
 5. Aguardar conclusão (~2-5 min)
 6. Abrir diretório de saída e inspecionar arquivos .md
 
 **Resultado esperado**:
 - ✅ Arquivos .md criados no diretório
-- ✅ YAML front matter com metadados
+- ✅ Arquivos .md com conteudo puro
+- ✅ Arquivos _metadata.json para cada MD
 - ✅ Keywords contextuais (não genéricas)
 - ✅ Conteúdo chunking adequado (~2048 chars)
 - ✅ Logs mostram: `[HH:MM:SS] 🎉 ARQUIVOS MD GERADOS COM SUCESSO!`
 
-**Validação de Keywords**:
+**Validacao de Keywords**:
 ```bash
-# Verificar keywords geradas
+# Verificar keywords geradas nos metadados
 cd <diretorio_saida>
-grep "keywords:" *.md | head -10
+grep "palavras-chave" *_metadata.json | head -10
 ```
 
 Boas keywords: `art. 317 CLT`, `Lei 9.394/1996`, `Súmula 374 TST`  
 Ruins (genéricas): `CLT`, `direito`, `legislação`
 
-### Teste 3: Upload para Collection
+### Teste 3: Upload para Collection (V3)
 
 **Objetivo**: Confirmar upload e indexação na Collection.
 
 **Passos**:
-1. Após gerar MD, clicar em "2. Upload para Collection"
-2. Confirmar no diálogo
-3. Observar progresso
-4. Aguardar conclusão (~2-5 min)
-5. Verificar janela de feedback final
+1. Executar `python CollectionUploaderV3.py`
+2. Selecionar ou criar Collection em Configuracoes
+3. Selecionar arquivos MD ou pasta de saida
+4. Clicar em "Upload para Collection"
+5. Observar progresso
+6. Aguardar conclusao (~2-5 min)
+7. Verificar janela de feedback final
 
 **Resultado esperado**:
 - ✅ Upload sem erros
-- ✅ Logs mostram: `[HH:MM:SS] 🎉 UPLOAD CONCLUÍDO COM SUCESSO!`
+- ✅ Logs mostram: `[HH:MM:SS] ✅ Upload concluido!`
 - ✅ Número de documentos enviados correto
 
-### Teste 4: Verificação no xAI Console
+### Teste 4: Verificacao no xAI Console
 
 **Objetivo**: Confirmar documentos indexados corretamente.
 
@@ -159,7 +161,7 @@ python check_collection_schema.py <management_key> <collection_id>
    ✅ numero_processo                 (text)
    ✅ data_publicacao                 (date)
    ✅ tipo_acao                       (text)
-   ✅ keywords                        (array)
+   ✅ palavras-chave                  (array)
 
 ⚙️  Collection Settings:
 ----------------------------------------------------------------------

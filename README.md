@@ -19,17 +19,28 @@ Sistema desenvolvido para o Tribunal Regional do Trabalho da 10ª Região (TRT-1
 
 ## ✨ Componentes do Sistema
 
-### 1. **Collection Uploader UI** (Flet)
-Interface gráfica para processar e fazer upload de documentos.
+### 1. **MD Generation UI (V3)** (Flet)
+Interface gráfica para gerar arquivos MD e metadados JSON.
 
 **Características:**
 - Geração de keywords via Grok LLM (contextual, não regex)
 - Chunking inteligente (2048 chars, overlap 256)
-- Upload direto para xAI Collections API
+- Opção de não dividir JSON em chunks
+- Saída separada: MD (conteúdo) + JSON (metadados)
 - Configurações persistentes
 - Feedback visual em tempo real
 
-### 2. **Collection Uploader CLI** (Python)
+### 2. **Collection Uploader UI (V3)** (Flet)
+Interface gráfica para upload de MDs com metadados JSON.
+
+**Características:**
+- Upload direto para xAI Collections API (multipart)
+- Validação de pares MD + metadados
+- Verificação de schema de metadados da Collection
+- Criação opcional de Collection com campos pré-definidos
+- Feedback visual em tempo real
+
+### 3. **Collection Uploader CLI** (Python)
 Versão linha de comando para processamento em lote.
 
 **Características:**
@@ -38,7 +49,7 @@ Versão linha de comando para processamento em lote.
 - Estatísticas detalhadas
 - Configuração via JSON
 
-### 3. **Precedente Search App** (Flet)
+### 4. **Precedente Search App** (Flet)
 Aplicação de busca interativa de precedentes.
 
 **Características:**
@@ -73,16 +84,26 @@ pip install -r requirements_app.txt          # Para busca
 
 ### Uso Rápido
 
-#### **Opção 1: Interface Gráfica (Uploader)**
+#### **Opção 1: Interface Gráfica (V3)**
 
 ```bash
-python CollectionUploaderV2UI.py
+python MD_GenerationV3.py
 ```
 
 1. Configure credenciais em ⚙️ **Configurações**
 2. Selecione arquivos JSON
-3. Clique em **"1. Gerar Arquivos MD"**
-4. Clique em **"2. Upload para Collection"**
+3. (Opcional) Marque **"do not chunk JSON objects"**
+4. Clique em **"Gerar Arquivos MD"**
+
+Depois, faça o upload:
+
+```bash
+python CollectionUploaderV3.py
+```
+
+1. Configure **Management Key** e selecione ou crie a Collection
+2. Selecione os arquivos MD ou a pasta de saída
+3. Clique em **"Upload para Collection"**
 
 #### **Opção 2: Linha de Comando (Uploader)**
 
@@ -124,17 +145,19 @@ python PrecedenteSearchApp.py
 
 ### Saída (Markdown)
 ```markdown
----
-categoria: HORAS EXTRAORDINÁRIAS
-reclamada: Empresa XYZ LTDA
-numero_processo: 0000123-45.2023.5.10.0009
-data_publicacao: 2023-06-15
-tipo_acao: Reclamação Trabalhista
-keywords: art. 59 CLT, horas extras, banco de horas, acordo coletivo
----
-# HORAS EXTRAORDINÁRIAS
-
 [Fundamentação jurídica...]
+```
+
+### Saída (Metadata JSON)
+```json
+{
+  "categoria": "HORAS EXTRAORDINÁRIAS",
+  "reclamada": "Empresa XYZ LTDA",
+  "numero_processo": "0000123-45.2023.5.10.0009",
+  "data_publicacao": "2023-06-15",
+  "tipo_acao": "Reclamação Trabalhista",
+  "palavras-chave": ["art. 59 CLT", "horas extras", "banco de horas"]
+}
 ```
 
 ---
@@ -167,6 +190,8 @@ keywords: art. 59 CLT, horas extras, banco de horas, acordo coletivo
 GrokCollectionUpload-Search/
 ├── CollectionUploaderV2.py       # CLI uploader
 ├── CollectionUploaderV2UI.py     # GUI uploader (Flet)
+├── MD_GenerationV3.py            # GUI gerador MD + metadados
+├── CollectionUploaderV3.py       # GUI upload MD + metadados
 ├── PrecedenteSearchApp.py        # Busca de precedentes (Flet)
 ├── config_example.json           # Template de configuração
 ├── requirements_*.txt            # Dependências
@@ -206,6 +231,12 @@ GrokCollectionUpload-Search/
    - **Embedding Model**: Padrão xAI
 4. Copie Management Key e Collection ID
 
+### Criar Collection pela UI (V3)
+
+Na tela de **Configurações** do CollectionUploaderV3, marque **"Criar nova collection"**,
+informe o nome e clique em **"Criar Collection"**. A Collection será criada com os
+campos de metadados necessários.
+
 ---
 
 ## 📚 Documentação
@@ -215,6 +246,15 @@ Style guideline: usamos inicialização por atribuição de propriedades em widg
 - **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Guia completo de uso
 - **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testes e diagnósticos
 - **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - Instruções para AI agents
+
+---
+
+## 🧩 Sugestoes de Arquitetura (Opcional)
+
+- **Plugin-based**: separar geracao e upload como modulos carregaveis
+- **Config presets**: usar perfis de configuracao para diferentes fluxos
+- **Fila de processamento**: enfileirar lotes grandes para evitar bloqueios
+- **Camada de validacao**: verificar consistencia entre MD e metadados antes do upload
 
 ---
 

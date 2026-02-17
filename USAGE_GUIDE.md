@@ -22,13 +22,14 @@ Este sistema possui **3 componentes principais**:
 
 | Componente | Interface | Função | Quando Usar |
 |------------|-----------|--------|-------------|
-| **Collection Uploader UI** | Flet (GUI) | Upload de documentos | Interface visual, facilidade de uso |
+| **MD Generation UI (V3)** | Flet (GUI) | Gerar MD + metadados | Geracao de arquivos com IA |
+| **Collection Uploader UI (V3)** | Flet (GUI) | Upload de documentos | Envio com validacao de metadados |
 | **Collection Uploader CLI** | Terminal | Upload de documentos | Automação, scripts, lotes grandes |
 | **Precedente Search App** | Flet (GUI) | Busca de precedentes | Consultas interativas, chat com Grok |
 
 ---
 
-## Collection Uploader UI (Flet)
+## MD Generation UI (V3)
 
 ### Instalação e Execução
 
@@ -37,43 +38,49 @@ Este sistema possui **3 componentes principais**:
 pip install -r requirements_uploader_ui.txt
 
 # Executar
-python CollectionUploaderV2UI.py
+python MD_GenerationV3.py
 ```
 
 ### Workflow Completo
 
-#### 1. **Configuração Inicial**
+#### 1. **Configuracao Inicial**
 
 Ao abrir, clique em ⚙️ **Configurações** e preencha:
 
-- **Management Key**: xai-mgmt-... (para gerenciar Collections)
 - **API Key**: xai-... (para gerar keywords com Grok)
 - **Modelo Grok**: Selecione no dropdown (recomendado: grok-beta)
 
 Clique em **"Carregar Collections"** para listar suas Collections disponíveis.
 
-#### 2. **Seleção de Arquivos**
+#### 2. **Selecao de Arquivos**
 
 - **Arquivos JSON**: Clique e selecione um ou mais arquivos .json com sentenças
 - **Diretório de Saída**: Escolha onde salvar os arquivos .md gerados
 
-#### 3. **Geração de Markdown**
+#### 3. **Geracao de Markdown**
 
 Clique no botão azul **"1. Gerar Arquivos MD"**
 
-O sistema irá:
+O sistema ira:
 - Ler cada sentença do JSON
 - Gerar keywords contextuais via Grok LLM
-- Dividir em chunks (2048 chars, overlap 256)
-- Criar arquivos .md com metadados
+- Dividir em chunks (2048 chars, overlap 256) ou gerar um unico arquivo por sentenca
+- Criar arquivos .md apenas com conteudo
+- Criar arquivos .json separados com metadados
 
 **Tempo estimado**: 2-5 minutos para 25 sentenças
 
-#### 4. **Upload para Collection**
+#### 4. **Upload para Collection (V3)**
 
-Clique no botão verde **"2. Upload para Collection"**
+Execute:
 
-- Confirme no diálogo
+```bash
+python CollectionUploaderV3.py
+```
+
+Clique no botao verde **"Upload para Collection"**
+
+- Selecione ou crie uma Collection nas Configuracoes
 - Aguarde upload (~2-5 minutos)
 - Verifique conclusão no log
 
@@ -83,6 +90,8 @@ Clique no botão verde **"2. Upload para Collection"**
 
 - ✅ Dropdown de Collections (carrega automaticamente)
 - ✅ Dropdown de Modelos (grok-beta, grok-2-1212, etc.)
+- ✅ Criacao de Collection com metadados pre-definidos
+- ✅ Validacao de schema de metadados
 - ✅ Progresso em tempo real
 - ✅ Logs com timestamps coloridos
 - ✅ Configurações salvas automaticamente
@@ -263,23 +272,26 @@ Estrutura **obrigatória**:
 ### Markdown Gerado
 
 ```markdown
----
-categoria: ADICIONAL DE INSALUBRIDADE
-reclamada: Hospital XYZ LTDA
-numero_processo: 0000006-73.2023.5.10.0009
-data_publicacao: 2023-11-17
-tipo_acao: Reclamação Trabalhista
-keywords: art. 192 CLT, insalubridade, adicional, grau médio, laudo pericial
----
-# ADICIONAL DE INSALUBRIDADE
-
 [Texto da fundamentação...]
 ```
 
 **Observações:**
-- YAML front matter com metadados
-- Keywords geradas por LLM (não regex)
-- Chunks separados em arquivos quando >2048 chars
+- Conteudo puro (sem YAML front matter)
+- Metadados armazenados em JSON separado
+- Chunks separados em arquivos quando >2048 chars (opcional)
+
+### Metadata JSON Gerado
+
+```json
+{
+  "categoria": "ADICIONAL DE INSALUBRIDADE",
+  "reclamada": "Hospital XYZ LTDA",
+  "numero_processo": "0000006-73.2023.5.10.0009",
+  "data_publicacao": "2023-11-17",
+  "tipo_acao": "Reclamação Trabalhista",
+  "palavras-chave": ["art. 192 CLT", "insalubridade", "adicional", "grau medio"]
+}
+```
 
 ---
 
@@ -311,7 +323,7 @@ keywords: art. 192 CLT, insalubridade, adicional, grau médio, laudo pericial
 | numero_processo | text | ❌ No | ✅ Yes |
 | data_publicacao | date | ❌ No | ✅ Yes |
 | tipo_acao | text | ❌ No | ✅ Yes |
-| keywords | array | ✅ Yes | ❌ No |
+| palavras-chave | array | ✅ Yes | ❌ No |
 
 3. Salve configurações
 
@@ -332,7 +344,7 @@ keywords: art. 192 CLT, insalubridade, adicional, grau médio, laudo pericial
 A: Sim, o sistema gera .md locais para review e backup, depois faz upload via API.
 
 **Q: Posso fazer upload direto do JSON sem gerar MD?**  
-A: Não. O processo atual é: JSON → MD (com keywords) → Upload.
+A: Não. O processo atual é: JSON → MD (conteudo) + metadata JSON → Upload.
 
 **Q: Como adiciono novas sentenças?**  
 A: Processe novo JSON e faça upload incremental. Evite duplicatas.
