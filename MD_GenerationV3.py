@@ -421,8 +421,8 @@ class MDGenerationV3:
             border_radius=10,
         )
 
-    async def pick_json_files(self, e):
-        def open_file_dialog():
+    def pick_json_files(self, e):
+        try:
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
@@ -434,25 +434,24 @@ class MDGenerationV3:
                 filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")],
             )
             root.destroy()
-            return files
 
-        files = await asyncio.to_thread(open_file_dialog)
+            if files:
+                self.selected_json_files = list(files)
+                files_text = "\n".join([f"• {os.path.basename(path)}" for path in files])
+                self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
+                self.json_files_list.color = "#388E3C"
+                self.check_generate_button_state()
+            else:
+                self.selected_json_files = []
+                self.json_files_list.value = "Nenhum arquivo selecionado"
+                self.json_files_list.color = "#616161"
 
-        if files:
-            self.selected_json_files = list(files)
-            files_text = "\n".join([f"• {os.path.basename(path)}" for path in files])
-            self.json_files_list.value = f"Arquivos selecionados:\n{files_text}"
-            self.json_files_list.color = "#388E3C"
-            self.check_generate_button_state()
-        else:
-            self.selected_json_files = []
-            self.json_files_list.value = "Nenhum arquivo selecionado"
-            self.json_files_list.color = "#616161"
+            self.page.update()
+        except Exception as exc:
+            self.log(f"❌ Erro ao abrir seletor de arquivos: {str(exc)}")
 
-        self.page.update()
-
-    async def pick_output_folder(self, e):
-        def open_folder_dialog():
+    def pick_output_folder(self, e):
+        try:
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
@@ -460,21 +459,20 @@ class MDGenerationV3:
             root.focus_force()
             path = filedialog.askdirectory(parent=root, title="Selecione a pasta de saída")
             root.destroy()
-            return path
 
-        path = await asyncio.to_thread(open_folder_dialog)
+            if path:
+                self.output_directory = str(path)
+                self.output_folder_text.value = f"Pasta de Saída: {self.output_directory}"
+                self.output_folder_text.color = "#388E3C"
+                self.check_generate_button_state()
+            else:
+                self.output_directory = ""
+                self.output_folder_text.value = "Nenhuma pasta de saída selecionada"
+                self.output_folder_text.color = "#616161"
 
-        if path:
-            self.output_directory = str(path)
-            self.output_folder_text.value = f"Pasta de Saída: {self.output_directory}"
-            self.output_folder_text.color = "#388E3C"
-            self.check_generate_button_state()
-        else:
-            self.output_directory = ""
-            self.output_folder_text.value = "Nenhuma pasta de saída selecionada"
-            self.output_folder_text.color = "#616161"
-
-        self.page.update()
+            self.page.update()
+        except Exception as exc:
+            self.log(f"❌ Erro ao abrir seletor de pasta: {str(exc)}")
 
     def check_generate_button_state(self):
         can_generate = (

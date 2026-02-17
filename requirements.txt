@@ -1,0 +1,11 @@
+# Unified Requirements for Grok Collection Upload & Search System
+# Baseline validado em Python 3.12
+
+# Framework de UI
+flet==0.80.5
+
+# HTTP requests para xAI API
+requests==2.32.5
+
+# Clipboard para copiar chat
+pyperclip==1.9.0

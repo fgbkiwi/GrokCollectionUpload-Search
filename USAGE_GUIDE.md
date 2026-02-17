@@ -83,6 +83,7 @@ Clique no botao verde **"Upload para Collection"**
 - Selecione ou crie uma Collection nas Configuracoes
 - Aguarde upload (~2-5 minutos)
 - Verifique conclusão no log
+- **Recomendacao**: se houver erro HTTP 500 relacionado a proxy/CDN, use VPN durante o upload
 
 **Resultado**: Documentos indexados na Collection prontos para busca
 

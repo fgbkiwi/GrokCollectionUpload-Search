@@ -104,6 +104,7 @@ python CollectionUploaderV3.py
 1. Configure **Management Key** e selecione ou crie a Collection
 2. Selecione os arquivos MD ou a pasta de saída
 3. Clique em **"Upload para Collection"**
+4. **Recomendação**: se ocorrerem erros intermitentes de rede (HTTP 500 com mensagens de proxy), utilize uma VPN durante o upload
 
 #### **Opção 2: Linha de Comando (Uploader)**
 
