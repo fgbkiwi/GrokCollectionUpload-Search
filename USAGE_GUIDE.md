@@ -188,13 +188,15 @@ python PrecedenteSearchApp.py
 
 ### Configuração
 
-Cliqueem ⚙️ **Configurações** e preencha:
+Clique em ⚙️ **Configurações** e preencha:
 
 - **Management Key**: Para acessar Collections
 - **API Key**: Para usar Grok
 - **Modelo**: Selecione (recomendado: grok-2-1212 para busca)
 - **Temperature**: 0.7 (padrão) - menor = mais conservador
 - **System Prompt**: Customize o comportamento do Grok
+
+**Nota**: Code Execution está sempre ativo, permitindo ao Grok executar cálculos trabalhistas complexos (horas extras, verbas rescisórias, etc.)
 
 **System Prompt recomendado:**
 ```
@@ -205,17 +207,20 @@ doutrina trabalhista. SEMPRE cite o número do processo ao mencionar precedentes
 
 ### Uso
 
-1. **Selecione Collection**: Dropdown no topo
-2. **Habilite busca**: Toggle "Buscar na Collection"
-3. **Digite consulta**: Exemplo: "Como fundamentar justa causa por insubordinação?"
-4. **Receba resposta**: Grok analisa precedentes e responde
+1. **Selecione Collection**: Dropdown no topo (obrigatório para busca com contexto)
+2. **Digite consulta**: Exemplo: "Como fundamentar justa causa por insubordinação?"
+3. **Receba resposta**: Grok analisa precedentes da collection selecionada e responde
+
+**Nota**: Se nenhuma collection estiver selecionada, o chat funcionará normalmente mas sem contexto de precedentes, utilizando apenas o conhecimento geral do modelo.
+
+**Atenção**: Alterar a collection durante uma conversa ativa reiniciará o chat e todo o contexto será perdido.
 
 ### Recursos
 
 - ✅ Chat interativo com histórico
 - ✅ Anexar arquivos ao contexto (petições, documentos)
 - ✅ Copiar histórico completo do chat
-- ✅ Busca em tempo real (Web/X) opcional
+- ✅ Busca semântica automática na collection selecionada
 - ✅ Temas claro/escuro
 - ✅ Limpar chat
 

@@ -185,6 +185,33 @@ python PrecedenteSearchApp.py
 
 ---
 
+## ⚠️ Limitações da API e Considerações Técnicas
+
+### Document Chunking e Upload
+- **Chunking Automático**: Durante o upload via `CollectionUploaderV2.py`, documentos são automaticamente divididos em chunks de 2048 caracteres com overlap de 256 caracteres. Isso otimiza a busca semântica, mas significa que o documento completo **não é armazenado como uma unidade única** na Collection.
+- **Racional**: Baseado na análise do corpus (90.9% dos documentos cabem em 1 chunk), previne problemas de API e melhora performance de busca.
+- **Impacto**: Buscas retornam trechos relevantes dos chunks, não o documento inteiro. Para análise completa, considere reconstruir o documento ou ajustar a estratégia de chunking.
+
+### Limitações de Anexos na Busca (PrecedentSearchApp)
+- **Truncamento de Arquivos**: Quando anexar arquivos MD na interface de busca (`PrecedentSearchApp.py`), apenas os primeiros **5000 caracteres** (~1250 tokens) de cada arquivo são incluídos no contexto da conversa.
+- **Racional**: Previne sobrecarga de prompts grandes e mantém performance da UI, mesmo com arquivos de 500k-600k tokens.
+- **Impacto**: O modelo Grok (com janela de contexto de 2M tokens) não consegue analisar o documento completo quando anexado desta forma.
+
+### Janela de Contexto vs. Limitações Práticas
+- **Contexto Teórico**: Modelos como Grok 4.1 Fast suportam até 2M tokens, suficiente para documentos grandes.
+- **Limitações Práticas**: APIs podem ter timeouts, limites de rate, ou problemas de memória com prompts muito grandes. O sistema prioriza eficiência sobre análise completa em tempo real.
+- **Soluções Sugeridas**:
+  - **Aumentar Limite de Anexos**: Modificar `PrecedentSearchApp.py` para ler mais caracteres (ex.: `[:50000]` ou remover truncamento).
+  - **Chunking para Anexos**: Implementar divisão em chunks similares ao uploader para arquivos anexados.
+  - **Upload Direto**: Para análise completa, faça upload do documento para Collections e use busca semântica em vez de anexos.
+
+### Recomendações
+- Para documentos muito grandes (>100k tokens), considere pré-processamento ou divisão em seções menores.
+- Monitore logs de erro da API xAI para identificar limitações específicas.
+- Teste com dados de exemplo em `sentencas_md_test_sample/` antes de produção.
+
+---
+
 ## 📁 Estrutura do Projeto
 
 ```

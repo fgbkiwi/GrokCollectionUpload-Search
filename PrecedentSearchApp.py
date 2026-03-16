@@ -261,7 +261,7 @@ class XAIClient:
             raise Exception(f"Erro na requisição: {str(e)}")
 
 
-class PrecedenteSearchApp:
+class PrecedentSearchApp:
     """Aplicação principal de busca de precedentes."""
     
     def __init__(self, page: ft.Page):
@@ -271,6 +271,7 @@ class PrecedenteSearchApp:
         self.messages: List[Dict] = []
         self.attached_files: List[str] = []
         self.available_models: List[str] = []
+        self.previous_collection_id: str = ""
         
         self.page.title = "Busca de Precedentes Trabalhistas"
         self.page.theme_mode = ft.ThemeMode.DARK if self.config_manager.get("theme_dark") else ft.ThemeMode.LIGHT
@@ -356,17 +357,12 @@ class PrecedenteSearchApp:
         self.collection_dropdown.label = "Collection"
         self.collection_dropdown.options = []
         self.collection_dropdown.on_change = self.on_collection_changed  # type: ignore[attr-defined]
-        self.collection_dropdown.on_blur = self.on_collection_changed  # type: ignore[attr-defined]
         self.collection_dropdown.expand = True
 
         self.collection_refresh_button = ft.IconButton()
         self.collection_refresh_button.icon = ft.Icons.REFRESH
         self.collection_refresh_button.tooltip = "Atualizar collections"
         self.collection_refresh_button.on_click = self.refresh_collections_click
-
-        self.collection_search_toggle = ft.Switch()
-        self.collection_search_toggle.label = "Buscar na collection"
-        self.collection_search_toggle.value = True
 
         self.collection_status_text = ft.Text()
         self.collection_status_text.value = ""
@@ -386,7 +382,7 @@ class PrecedenteSearchApp:
             ft.Icon(icon=ft.Icons.SEND),
             ft.Text(value="Enviar"),
         ]
-        self.send_button = ft.ElevatedButton(
+        self.send_button = ft.Button(
             content=ft.Row(controls=send_button_controls, tight=True),
             on_click=self.send_message_click,
         )
@@ -415,7 +411,7 @@ class PrecedenteSearchApp:
         collection_controls = ft.Column(
             controls=[
                 ft.Row(
-                    controls=[self.collection_dropdown, self.collection_refresh_button, self.collection_search_toggle],
+                    controls=[self.collection_dropdown, self.collection_refresh_button],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
                 self.collection_status_text,
@@ -467,6 +463,7 @@ class PrecedenteSearchApp:
         selected_id = self.config_manager.get("selected_collection_id")
         if selected_id and any(opt.key == selected_id for opt in self.collection_dropdown.options):
             self.collection_dropdown.value = str(selected_id)
+            self.previous_collection_id = str(selected_id)
         
         self.page.update()
 
@@ -502,9 +499,59 @@ class PrecedenteSearchApp:
         status_text.value = f"Modelos carregados: {len(model_ids)}"
         self.page.update()
     
+    def has_active_conversation(self) -> bool:
+        """Verifica se há conversa ativa (com resposta do assistant)."""
+        return any(msg.get("role") == "assistant" for msg in self.messages)
+    
     def on_collection_changed(self, e):
         """Callback quando a collection é alterada."""
-        self.config_manager.set("selected_collection_id", self.collection_dropdown.value)
+        new_collection_id = str(self.collection_dropdown.value or "")
+        
+        # Se não houve mudança real, ignora
+        if new_collection_id == self.previous_collection_id:
+            return
+        
+        # Se há conversa ativa, pede confirmação
+        if self.has_active_conversation():
+            self.confirm_collection_change(new_collection_id)
+        else:
+            # Sem conversa ativa, aplica diretamente
+            self.apply_collection_change(new_collection_id)
+    
+    def confirm_collection_change(self, new_collection_id: str):
+        """Abre modal de confirmação para troca de collection."""
+        def on_cancel(e):
+            # Restaura collection anterior
+            self.collection_dropdown.value = self.previous_collection_id
+            self.close_dialog(dlg)
+        
+        def on_confirm(e):
+            self.close_dialog(dlg)
+            self.apply_collection_change(new_collection_id)
+            # Reseta o chat
+            self.chat_container.controls.clear()
+            self.messages.clear()
+            self.attached_files.clear()
+            self.add_system_message("🔄 Chat resetado devido à mudança de collection.")
+            self.add_system_message("👨‍⚖️ **Sistema de Busca de Precedentes Trabalhistas**")
+        
+        dlg = ft.AlertDialog()
+        dlg.title = ft.Text("⚠️ Alterar Collection")
+        dlg.content = ft.Text(
+            "Alterar a collection reiniciará o chat atual e todo o contexto será perdido. Deseja continuar?",
+            size=14,
+        )
+        dlg.actions = [
+            ft.TextButton(content=ft.Text("Cancelar"), on_click=on_cancel),
+            ft.Button(content=ft.Text("Continuar"), on_click=on_confirm),
+        ]
+        dlg.modal = True
+        self.open_dialog(dlg)
+    
+    def apply_collection_change(self, new_collection_id: str):
+        """Aplica a mudança de collection."""
+        self.previous_collection_id = new_collection_id
+        self.config_manager.set("selected_collection_id", new_collection_id)
     
     def add_message(self, content: str, is_user: bool = True):
         """Adiciona mensagem ao chat."""
@@ -629,12 +676,14 @@ class PrecedenteSearchApp:
             for f in self.attached_files:
                 try:
                     with open(f, 'r', encoding='utf-8') as f_content:
-                        ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:5000]}\n"
+                        ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:50000000]}\n"
                 except Exception: pass
             messages.append({"role": "system", "content": ctx})
 
         collection_id = str(self.collection_dropdown.value or "")
-        if self.collection_search_toggle.value and self.xai_client and collection_id:
+        if not collection_id:
+            self.add_system_message("⚠️ Nenhuma collection selecionada. A busca será realizada sem contexto de collection.")
+        elif self.xai_client:
             results = await asyncio.to_thread(
                 self.xai_client.search_documents,
                 user_message,
@@ -671,11 +720,14 @@ class PrecedenteSearchApp:
             if not self.xai_client:
                 raise Exception("Cliente não inicializado")
 
+            # Nota: code_execution removido temporariamente (API retorna 422)
+            # TODO: Investigar formato correto de tools na documentação xAI
             response = await asyncio.to_thread(
                 self.xai_client.chat_completion,
                 messages,
                 str(self.config_manager.get("model") or "grok-2-1212"),
                 float(self.config_manager.get("temperature") or 0.7),
+                None,  # tools desabilitado
             )
             ans = str(response["choices"][0]["message"]["content"])
             self.add_message(ans, is_user=False)
@@ -756,7 +808,7 @@ class PrecedenteSearchApp:
             scroll=ft.ScrollMode.AUTO,
             height=400,
         )
-        dlg.actions = [ft.ElevatedButton(content=ft.Text("Salvar"), on_click=save)]
+        dlg.actions = [ft.Button(content=ft.Text("Salvar"), on_click=save)]
         self.open_dialog(dlg)
         self.update_xai_client()
         self.refresh_models(model, model_status)
@@ -774,7 +826,7 @@ class PrecedenteSearchApp:
 
 
 def main(page: ft.Page):
-    PrecedenteSearchApp(page)
+    PrecedentSearchApp(page)
 
 if __name__ == "__main__":
     ft.run(main)

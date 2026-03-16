@@ -116,21 +116,23 @@ Ruins (genéricas): `CLT`, `direito`, `legislação`
 **Objetivo**: Validar busca semântica no Search App.
 
 ```bash
-python PrecedenteSearchApp.py
+python PrecedentSearchApp.py
 ```
 
 **Passos**:
 1. Configurar credenciais
-2. Selecionar Collection
-3. Habilitar "Buscar na Collection"
-4. Fazer consulta: "precedentes sobre insalubridade"
-5. Verificar resposta do Grok
+2. Selecionar Collection no dropdown
+3. Fazer consulta: "precedentes sobre insalubridade"
+4. Verificar resposta do Grok
+5. Testar mudança de collection durante conversa ativa (deve exibir modal de confirmação)
 
 **Resultado esperado**:
-- ✅ Grok retorna precedentes relevantes
+- ✅ Grok retorna precedentes relevantes da collection selecionada
 - ✅ Cita números de processo
 - ✅ Fundamenta com base nos documentos
 - ✅ Resposta específica ao domínio trabalhista
+- ✅ Sem collection: exibe alerta e continua chat sem contexto
+- ✅ Troca de collection com conversa ativa: pede confirmação e reseta chat
 
 ---
 
