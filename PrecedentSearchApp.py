@@ -1,20 +1,43 @@
 #!/usr/bin/env python3
 """
 PrecedenteSearchApp.py
-Aplicação Flet para busca semântica de precedentes trabalhistas usando xAI Collections.
+Aplicação PyQt6 para busca semântica de precedentes trabalhistas usando xAI Collections.
 """
 
-import flet as ft
 import json
 import requests
 import os
-import asyncio
+import sys
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pyperclip
-import tkinter as tk
-from tkinter import filedialog
+from PyQt6.QtCore import Qt, QThreadPool, QRunnable, QObject, pyqtSignal, QTimer
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QTextEdit,
+    QTextBrowser,
+    QPushButton,
+    QToolButton,
+    QComboBox,
+    QFileDialog,
+    QMessageBox,
+    QDialog,
+    QProgressBar,
+    QSlider,
+    QCheckBox,
+    QFrame,
+    QStyle,
+    QScrollArea,
+)
 
 
 class ConfigManager:
@@ -261,41 +284,59 @@ class XAIClient:
             raise Exception(f"Erro na requisição: {str(e)}")
 
 
-class PrecedentSearchApp:
+class WorkerSignals(QObject):
+    """Sinais para worker em background."""
+
+    finished = pyqtSignal(object)
+
+
+class Worker(QRunnable):
+    """Executa função em background sem travar a UI."""
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+    def run(self):
+        result = self.fn(*self.args, **self.kwargs)
+        self.signals.finished.emit(result)
+
+
+class PrecedentSearchApp(QMainWindow):
     """Aplicação principal de busca de precedentes."""
-    
-    def __init__(self, page: ft.Page):
-        self.page = page
+
+    INPUT_BASE_HEIGHT = 56
+    INPUT_MAX_MULTIPLIER = 4
+    RESPONSE_BASE_HEIGHT = 75
+    RESPONSE_MAX_MULTIPLIER = 4
+
+    def __init__(self):
+        super().__init__()
         self.config_manager = ConfigManager()
         self.xai_client: Optional[XAIClient] = None
         self.messages: List[Dict] = []
         self.attached_files: List[str] = []
         self.available_models: List[str] = []
         self.previous_collection_id: str = ""
-        
-        self.page.title = "Busca de Precedentes Trabalhistas"
-        self.page.theme_mode = ft.ThemeMode.DARK if self.config_manager.get("theme_dark") else ft.ThemeMode.LIGHT
-        self.page.padding = 0
-        
+        self.thread_pool = QThreadPool()
+        self._updating_collection = False
+        self.typing_card: Optional[QWidget] = None
+        self.loading_card: Optional[QWidget] = None
+
+        self.setWindowTitle("Busca de Precedentes Trabalhistas")
+        self.resize(1200, 860)
+
         self.update_xai_client()
         self.create_ui()
         self.schedule_startup_refresh()
 
     def schedule_startup_refresh(self):
         """Agenda o refresh inicial das collections."""
-        try:
-            if hasattr(self.page, "run_task"):
-                self.page.run_task(self.refresh_on_startup)
-            else:
-                asyncio.create_task(self.refresh_on_startup())
-        except Exception:
-            pass
+        QTimer.singleShot(200, self.refresh_collections)
 
-    async def refresh_on_startup(self):
-        """Atualiza collections no startup após a UI estar pronta."""
-        await asyncio.sleep(0.2)
-        self.refresh_collections()
-    
     def update_xai_client(self):
         """Atualiza o cliente xAI."""
         api_key = str(self.config_manager.get("api_key") or "")
@@ -304,143 +345,309 @@ class PrecedentSearchApp:
             self.xai_client = XAIClient(api_key, management_key)
         else:
             self.xai_client = None
-    
+
+    def apply_theme(self):
+        """Aplica tema claro/escuro na janela."""
+        is_dark = bool(self.config_manager.get("theme_dark"))
+        if is_dark:
+            self.setStyleSheet(
+                """
+                QMainWindow { background-color: #1f1f1f; color: #e8e8e8; }
+                QWidget { color: #e8e8e8; }
+                QTextEdit, QTextBrowser, QLineEdit, QComboBox {
+                    background-color: #2b2b2b;
+                    color: #f0f0f0;
+                    border: 1px solid #4a4a4a;
+                    border-radius: 4px;
+                }
+                QPushButton, QToolButton {
+                    background-color: #333333;
+                    color: #f0f0f0;
+                    border: 1px solid #4a4a4a;
+                    border-radius: 4px;
+                    padding: 6px;
+                }
+                QPushButton:hover, QToolButton:hover { background-color: #3d3d3d; }
+                QFrame#toolbarFrame { background-color: #333333; }
+                QLabel#statusLabel { color: #a0a0a0; }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                """
+                QMainWindow { background-color: #f7f7f7; color: #1a1a1a; }
+                QWidget { color: #1a1a1a; }
+                QTextEdit, QTextBrowser, QLineEdit, QComboBox {
+                    background-color: #ffffff;
+                    color: #1a1a1a;
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                }
+                QPushButton, QToolButton {
+                    background-color: #f5f5f5;
+                    color: #1a1a1a;
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 6px;
+                }
+                QPushButton:hover, QToolButton:hover { background-color: #e8e8e8; }
+                QFrame#toolbarFrame { background-color: #f5f5f5; }
+                QLabel#statusLabel { color: #666666; }
+                """
+            )
+
     def create_ui(self):
         """Cria a interface do usuário."""
-        # Toolbar
-        toolbar_bg = "#333333" if self.config_manager.get("theme_dark") else "#f5f5f5"
-        toolbar_icon_color = "#ffffff" if self.config_manager.get("theme_dark") else "#1a1a1a"
-        clear_button = ft.IconButton()
-        clear_button.icon = ft.Icons.DELETE_SWEEP
-        clear_button.icon_color = toolbar_icon_color
-        clear_button.tooltip = "Limpar chat"
-        clear_button.on_click = self.clear_chat
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        copy_button = ft.IconButton()
-        copy_button.icon = ft.Icons.COPY_ALL
-        copy_button.icon_color = toolbar_icon_color
-        copy_button.tooltip = "Copiar chat"
-        copy_button.on_click = self.copy_chat
+        toolbar_frame = QFrame()
+        toolbar_frame.setObjectName("toolbarFrame")
+        toolbar_layout = QHBoxLayout(toolbar_frame)
+        toolbar_layout.setContentsMargins(10, 10, 10, 10)
+        toolbar_layout.setSpacing(8)
 
-        attach_button = ft.IconButton()
-        attach_button.icon = ft.Icons.ATTACH_FILE
-        attach_button.icon_color = toolbar_icon_color
-        attach_button.tooltip = "Anexar arquivo"
-        attach_button.on_click = self.attach_file
+        clear_button = QToolButton()
+        clear_button.setToolTip("Limpar chat")
+        clear_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
+        clear_button.clicked.connect(self.clear_chat)
 
-        settings_button = ft.IconButton()
-        settings_button.icon = ft.Icons.SETTINGS
-        settings_button.icon_color = toolbar_icon_color
-        settings_button.tooltip = "Configurações"
-        settings_button.on_click = self.open_settings
+        copy_button = QToolButton()
+        copy_button.setToolTip("Copiar chat")
+        copy_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        copy_button.clicked.connect(self.copy_chat)
 
-        self.toolbar = ft.Row(
-            controls=[
-                clear_button,
-                copy_button,
-                attach_button,
-                settings_button,
-            ],
-            alignment=ft.MainAxisAlignment.START,
-        )
-        
-        # Chat
-        self.chat_container = ft.ListView(
-            expand=True,
-            spacing=10,
-            padding=20,
-            auto_scroll=True,
-        )
-        
+        attach_button = QToolButton()
+        attach_button.setToolTip("Anexar arquivo")
+        attach_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+        attach_button.clicked.connect(self.attach_file)
+
+        settings_button = QToolButton()
+        settings_button.setToolTip("Configurações")
+        settings_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView))
+        settings_button.clicked.connect(self.open_settings)
+
+        toolbar_layout.addWidget(clear_button)
+        toolbar_layout.addWidget(copy_button)
+        toolbar_layout.addWidget(attach_button)
+        toolbar_layout.addWidget(settings_button)
+        toolbar_layout.addStretch(1)
+
         # Collection selection
-        self.collection_dropdown = ft.Dropdown()
-        self.collection_dropdown.label = "Collection"
-        self.collection_dropdown.options = []
-        self.collection_dropdown.on_change = self.on_collection_changed  # type: ignore[attr-defined]
-        self.collection_dropdown.expand = True
+        collection_wrapper = QWidget()
+        collection_wrapper_layout = QVBoxLayout(collection_wrapper)
+        collection_wrapper_layout.setContentsMargins(10, 10, 10, 10)
+        collection_wrapper_layout.setSpacing(5)
 
-        self.collection_refresh_button = ft.IconButton()
-        self.collection_refresh_button.icon = ft.Icons.REFRESH
-        self.collection_refresh_button.tooltip = "Atualizar collections"
-        self.collection_refresh_button.on_click = self.refresh_collections_click
+        collection_row = QHBoxLayout()
+        collection_row.setSpacing(8)
 
-        self.collection_status_text = ft.Text()
-        self.collection_status_text.value = ""
-        self.collection_status_text.size = 12
-        self.collection_status_text.color = "grey"
-        
-        
+        self.collection_dropdown = QComboBox()
+        self.collection_dropdown.setEditable(False)
+        self.collection_dropdown.currentIndexChanged.connect(self.on_collection_changed)
+
+        self.collection_refresh_button = QToolButton()
+        self.collection_refresh_button.setToolTip("Atualizar collections")
+        self.collection_refresh_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        self.collection_refresh_button.clicked.connect(self.refresh_collections_click)
+
+        collection_row.addWidget(QLabel("Collection"))
+        collection_row.addWidget(self.collection_dropdown, 1)
+        collection_row.addWidget(self.collection_refresh_button)
+
+        self.collection_status_text = QLabel("")
+        self.collection_status_text.setObjectName("statusLabel")
+
+        collection_wrapper_layout.addLayout(collection_row)
+        collection_wrapper_layout.addWidget(self.collection_status_text)
+
         # Input
-        self.message_input = ft.TextField()
-        self.message_input.multiline = True
-        self.message_input.min_lines = 2
-        self.message_input.max_lines = 5
-        self.message_input.expand = True
-        self.message_input.on_submit = self.send_message_click  # type: ignore[attr-defined]
-        
-        send_button_controls: List[ft.Control] = [
-            ft.Icon(icon=ft.Icons.SEND),
-            ft.Text(value="Enviar"),
-        ]
-        self.send_button = ft.Button(
-            content=ft.Row(controls=send_button_controls, tight=True),
-            on_click=self.send_message_click,
-        )
+        input_wrapper = QWidget()
+        input_wrapper_layout = QHBoxLayout(input_wrapper)
+        input_wrapper_layout.setContentsMargins(10, 10, 10, 10)
+        input_wrapper_layout.setSpacing(8)
 
-        self.response_status_ring = ft.ProgressRing()
-        self.response_status_ring.width = 16
-        self.response_status_ring.height = 16
-        self.response_status_ring.stroke_width = 2
-        self.response_status_ring.visible = False
+        self.message_input = QTextEdit()
+        self.message_input.setPlaceholderText("Digite sua mensagem...")
+        self.message_input.setMinimumHeight(self.INPUT_BASE_HEIGHT)
+        self.message_input.setMaximumHeight(self.INPUT_BASE_HEIGHT * self.INPUT_MAX_MULTIPLIER)
+        self.message_input.textChanged.connect(self.adjust_message_input_height)
 
-        self.response_status_text = ft.Text()
-        self.response_status_text.value = ""
-        self.response_status_text.size = 12
-        self.response_status_text.color = "grey"
-        self.response_status_row = ft.Row(
-            controls=[self.response_status_ring, self.response_status_text],
-            spacing=6,
-        )
-        
-        # Layouts
-        input_area = ft.Row(
-            controls=[self.message_input, self.send_button],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        )
-        
-        collection_controls = ft.Column(
-            controls=[
-                ft.Row(
-                    controls=[self.collection_dropdown, self.collection_refresh_button],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                self.collection_status_text,
-            ],
-            spacing=5,
-        )
-        
-        main_layout = ft.Column(
-            controls=[
-                ft.Container(content=self.toolbar, bgcolor=toolbar_bg, padding=10),
-                self.chat_container,
-                ft.Divider(height=1),
-                ft.Container(content=collection_controls, padding=10),
-                ft.Container(content=input_area, padding=10),
-                ft.Container(content=self.response_status_row, padding=10),
-            ],
-            expand=True,
-        )
-        
-        self.page.add(main_layout)
+        self.send_button = QPushButton("Enviar")
+        self.send_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward))
+        self.send_button.clicked.connect(self.send_message_click)
+
+        input_wrapper_layout.addWidget(self.message_input, 1)
+        input_wrapper_layout.addWidget(self.send_button)
+
+        # Status row
+        status_wrapper = QWidget()
+        status_layout = QHBoxLayout(status_wrapper)
+        status_layout.setContentsMargins(10, 10, 10, 10)
+        status_layout.setSpacing(6)
+
+        self.response_status_ring = QProgressBar()
+        self.response_status_ring.setRange(0, 0)
+        self.response_status_ring.setFixedWidth(90)
+        self.response_status_ring.setFixedHeight(12)
+        self.response_status_ring.setVisible(False)
+
+        self.response_status_text = QLabel("")
+        self.response_status_text.setObjectName("statusLabel")
+
+        status_layout.addWidget(self.response_status_ring)
+        status_layout.addWidget(self.response_status_text)
+        status_layout.addStretch(1)
+
+        # Chat cards container
+        self.chat_cards = QWidget()
+        self.chat_cards_layout = QVBoxLayout(self.chat_cards)
+        self.chat_cards_layout.setContentsMargins(20, 20, 20, 20)
+        self.chat_cards_layout.setSpacing(10)
+        self.chat_cards_layout.addStretch(1)
+
+        self.chat_scroll_area = QScrollArea()
+        self.chat_scroll_area.setWidgetResizable(True)
+        self.chat_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.chat_scroll_area.setWidget(self.chat_cards)
+
+        main_layout.addWidget(toolbar_frame)
+        main_layout.addWidget(self.chat_scroll_area, 1)
+        main_layout.addWidget(collection_wrapper)
+        main_layout.addWidget(input_wrapper)
+        main_layout.addWidget(status_wrapper)
+
+        self.adjust_message_input_height()
+
+        send_action = QAction(self)
+        send_action.setShortcut("Ctrl+Return")
+        send_action.triggered.connect(self.send_message_click)
+        self.addAction(send_action)
+
+        self.apply_theme()
         self.add_system_message("👨‍⚖️ **Sistema de Busca de Precedentes Trabalhistas**")
-    
+
+    def remove_chat_stretch(self):
+        """Remove stretch final para inserir mensagem."""
+        count = self.chat_cards_layout.count()
+        if count and self.chat_cards_layout.itemAt(count - 1).spacerItem() is not None:
+            spacer = self.chat_cards_layout.takeAt(count - 1)
+            del spacer
+
+    def restore_chat_stretch(self):
+        """Restaura stretch para mensagens ficarem no topo."""
+        count = self.chat_cards_layout.count()
+        if not count or self.chat_cards_layout.itemAt(count - 1).spacerItem() is None:
+            self.chat_cards_layout.addStretch(1)
+
+    def scroll_to_bottom(self):
+        """Mantém o scroll no fim após novas mensagens."""
+        QTimer.singleShot(0, lambda: self.chat_scroll_area.verticalScrollBar().setValue(self.chat_scroll_area.verticalScrollBar().maximum()))
+
+    def create_message_card(
+        self,
+        header_text: str,
+        markdown_text: str,
+        bg_color: str,
+        elevation: int = 2,
+        enable_copy_buttons: bool = False,
+    ) -> QWidget:
+        """Cria cartão visual de mensagem com Markdown selecionável."""
+        card = QFrame()
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        card.setStyleSheet(
+            f"QFrame {{ background-color: {bg_color}; border: 1px solid #444; border-radius: 6px; }}"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(15, 15, 15, 15)
+        card_layout.setSpacing(8)
+
+        if header_text or enable_copy_buttons:
+            header_row = QHBoxLayout()
+            header_row.setSpacing(8)
+
+            if header_text:
+                header = QLabel(header_text)
+                header.setTextFormat(Qt.TextFormat.PlainText)
+                header.setStyleSheet("font-weight: 600;")
+                header_row.addWidget(header)
+
+            header_row.addStretch(1)
+
+            if enable_copy_buttons:
+                md_button = QToolButton()
+                md_button.setText("MD")
+                md_button.setToolTip("Copiar resposta em Markdown")
+                md_button.clicked.connect(lambda _, txt=markdown_text: self.copy_text_as_md(txt))
+
+                rtf_button = QToolButton()
+                rtf_button.setText("RTF")
+                rtf_button.setToolTip("Copiar resposta em RTF")
+                rtf_button.clicked.connect(lambda _, txt=markdown_text: self.copy_text_as_rtf(txt))
+
+                header_row.addWidget(md_button)
+                header_row.addWidget(rtf_button)
+
+            card_layout.addLayout(header_row)
+
+        body = QTextBrowser()
+        body.setReadOnly(True)
+        body.setOpenExternalLinks(False)
+        body.setFrameShape(QFrame.Shape.NoFrame)
+        body.setMarkdown(markdown_text)
+        body.setMinimumHeight(self.RESPONSE_BASE_HEIGHT)
+        body.setMaximumHeight(self.RESPONSE_BASE_HEIGHT * self.RESPONSE_MAX_MULTIPLIER)
+        self.adjust_text_widget_height(body, markdown_text, self.RESPONSE_BASE_HEIGHT, self.RESPONSE_MAX_MULTIPLIER)
+        body.setStyleSheet("background: transparent; border: none;")
+        card_layout.addWidget(body)
+
+        if elevation == 1:
+            card.setStyleSheet(
+                f"QFrame {{ background-color: {bg_color}; border: 1px solid #666; border-radius: 6px; }}"
+            )
+
+        return card
+
+    def calculate_dynamic_height(self, text: str, base_height: int, max_multiplier: int, line_spacing: int) -> int:
+        """Calcula altura dinâmica com limite máximo baseado em multiplicador."""
+        max_height = base_height * max_multiplier
+        line_count = max(1, len(str(text or "").splitlines()) or 1)
+        content_height = (line_count * line_spacing) + 24
+        return max(base_height, min(max_height, content_height))
+
+    def adjust_text_widget_height(self, widget: QTextEdit, text: str, base_height: int, max_multiplier: int) -> None:
+        """Aplica altura dinâmica em widgets de texto com limite de crescimento."""
+        line_spacing = widget.fontMetrics().lineSpacing()
+        target_height = self.calculate_dynamic_height(text, base_height, max_multiplier, line_spacing)
+        widget.setFixedHeight(target_height)
+
+    def adjust_message_input_height(self) -> None:
+        """Ajusta dinamicamente o campo de pergunta conforme quantidade de linhas."""
+        self.adjust_text_widget_height(
+            self.message_input,
+            self.message_input.toPlainText(),
+            self.INPUT_BASE_HEIGHT,
+            self.INPUT_MAX_MULTIPLIER,
+        )
+
+    def clear_chat_cards(self):
+        """Remove todos os cards de chat."""
+        while self.chat_cards_layout.count():
+            item = self.chat_cards_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.chat_cards_layout.addStretch(1)
+
     def refresh_collections(self):
         """Atualiza collections."""
         if not self.xai_client:
-            self.collection_status_text.value = "Configure a Management Key para carregar collections."
-            self.page.update()
+            self.collection_status_text.setText("Configure a Management Key para carregar collections.")
             return
-        
+
         collections = self.xai_client.list_collections()
         options = []
         for col in collections:
@@ -450,33 +657,42 @@ class PrecedentSearchApp:
             if not col_id:
                 continue
             col_name = col.get("name") or col.get("collection_name") or col_id
-            options.append(ft.dropdown.Option(key=str(col_id), text=str(col_name)))
+            options.append((str(col_name), str(col_id)))
 
-        self.collection_dropdown.options = options
+        self._updating_collection = True
+        self.collection_dropdown.blockSignals(True)
+        self.collection_dropdown.clear()
+        for name, cid in options:
+            self.collection_dropdown.addItem(name, cid)
+        self.collection_dropdown.blockSignals(False)
+        self._updating_collection = False
+
         if not options:
             error_msg = self.xai_client.last_collections_error or "Nenhuma collection retornada pela API."
             self.add_system_message(f"⚠️ Não foi possível carregar collections: {error_msg}")
-            self.collection_status_text.value = f"Falha ao carregar: {error_msg}"
+            self.collection_status_text.setText(f"Falha ao carregar: {error_msg}")
         else:
-            self.collection_status_text.value = f"Collections carregadas: {len(options)}"
-        
-        selected_id = self.config_manager.get("selected_collection_id")
-        if selected_id and any(opt.key == selected_id for opt in self.collection_dropdown.options):
-            self.collection_dropdown.value = str(selected_id)
-            self.previous_collection_id = str(selected_id)
-        
-        self.page.update()
+            self.collection_status_text.setText(f"Collections carregadas: {len(options)}")
 
-    def refresh_collections_click(self, e):
+        selected_id = self.config_manager.get("selected_collection_id")
+        if selected_id:
+            for idx in range(self.collection_dropdown.count()):
+                if self.collection_dropdown.itemData(idx) == str(selected_id):
+                    self.collection_dropdown.setCurrentIndex(idx)
+                    break
+            self.previous_collection_id = str(selected_id)
+        elif self.collection_dropdown.count() > 0:
+            self.previous_collection_id = str(self.collection_dropdown.itemData(self.collection_dropdown.currentIndex()) or "")
+
+    def refresh_collections_click(self, *_):
         """Callback para botão de atualizar collections."""
         self.update_xai_client()
         self.refresh_collections()
 
-    def refresh_models(self, model_dropdown: ft.Dropdown, status_text: ft.Text):
+    def refresh_models(self, model_dropdown: QComboBox, status_text: QLabel):
         """Atualiza a lista de modelos na UI de configurações."""
         if not self.xai_client:
-            status_text.value = "Configure a API Key para carregar modelos."
-            self.page.update()
+            status_text.setText("Configure a API Key para carregar modelos.")
             return
 
         model_ids = self.xai_client.list_models()
@@ -484,117 +700,271 @@ class PrecedentSearchApp:
 
         if not model_ids:
             error_msg = self.xai_client.last_models_error or "Nenhum modelo retornado pela API."
-            status_text.value = f"Falha ao carregar: {error_msg}"
-            model_dropdown.options = []
-            model_dropdown.value = ""
-            self.page.update()
+            status_text.setText(f"Falha ao carregar: {error_msg}")
+            model_dropdown.clear()
             return
 
-        model_dropdown.options = [ft.dropdown.Option(mid) for mid in model_ids]
+        model_dropdown.clear()
+        model_dropdown.addItems(model_ids)
         current_model = str(self.config_manager.get("model") or "")
         if current_model in model_ids:
-            model_dropdown.value = current_model
+            model_dropdown.setCurrentText(current_model)
         else:
-            model_dropdown.value = model_ids[0]
-        status_text.value = f"Modelos carregados: {len(model_ids)}"
-        self.page.update()
-    
+            model_dropdown.setCurrentIndex(0)
+        status_text.setText(f"Modelos carregados: {len(model_ids)}")
+
     def has_active_conversation(self) -> bool:
         """Verifica se há conversa ativa (com resposta do assistant)."""
         return any(msg.get("role") == "assistant" for msg in self.messages)
-    
-    def on_collection_changed(self, e):
+
+    def on_collection_changed(self, *_):
         """Callback quando a collection é alterada."""
-        new_collection_id = str(self.collection_dropdown.value or "")
-        
+        if self._updating_collection:
+            return
+
+        new_collection_id = str(self.collection_dropdown.currentData() or "")
+
         # Se não houve mudança real, ignora
         if new_collection_id == self.previous_collection_id:
             return
-        
+
         # Se há conversa ativa, pede confirmação
         if self.has_active_conversation():
             self.confirm_collection_change(new_collection_id)
         else:
             # Sem conversa ativa, aplica diretamente
             self.apply_collection_change(new_collection_id)
-    
+
     def confirm_collection_change(self, new_collection_id: str):
         """Abre modal de confirmação para troca de collection."""
-        def on_cancel(e):
-            # Restaura collection anterior
-            self.collection_dropdown.value = self.previous_collection_id
-            self.close_dialog(dlg)
-        
-        def on_confirm(e):
-            self.close_dialog(dlg)
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("⚠️ Alterar Collection")
+        msg.setText("Alterar a collection reiniciará o chat atual e todo o contexto será perdido. Deseja continuar?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok)
+        msg.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        response = msg.exec()
+
+        if response == QMessageBox.StandardButton.Ok:
             self.apply_collection_change(new_collection_id)
             # Reseta o chat
-            self.chat_container.controls.clear()
+            self.clear_chat_cards()
             self.messages.clear()
             self.attached_files.clear()
             self.add_system_message("🔄 Chat resetado devido à mudança de collection.")
             self.add_system_message("👨‍⚖️ **Sistema de Busca de Precedentes Trabalhistas**")
-        
-        dlg = ft.AlertDialog()
-        dlg.title = ft.Text("⚠️ Alterar Collection")
-        dlg.content = ft.Text(
-            "Alterar a collection reiniciará o chat atual e todo o contexto será perdido. Deseja continuar?",
-            size=14,
-        )
-        dlg.actions = [
-            ft.TextButton(content=ft.Text("Cancelar"), on_click=on_cancel),
-            ft.Button(content=ft.Text("Continuar"), on_click=on_confirm),
-        ]
-        dlg.modal = True
-        self.open_dialog(dlg)
-    
+        else:
+            self.collection_dropdown.blockSignals(True)
+            for idx in range(self.collection_dropdown.count()):
+                if self.collection_dropdown.itemData(idx) == self.previous_collection_id:
+                    self.collection_dropdown.setCurrentIndex(idx)
+                    break
+            self.collection_dropdown.blockSignals(False)
+
     def apply_collection_change(self, new_collection_id: str):
         """Aplica a mudança de collection."""
         self.previous_collection_id = new_collection_id
         self.config_manager.set("selected_collection_id", new_collection_id)
-    
+
     def add_message(self, content: str, is_user: bool = True):
         """Adiciona mensagem ao chat."""
-        row_controls: List[ft.Control] = [
-            ft.Icon(icon=ft.Icons.PERSON if is_user else ft.Icons.SMART_TOY, size=20),
-            ft.Text(value="Você" if is_user else "Grok", weight=ft.FontWeight.BOLD, size=14),
-            ft.Text(value=datetime.now().strftime("%H:%M"), size=12, color="grey"),
-        ]
-        message_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column([
-                    ft.Row(controls=row_controls),
-                    ft.Markdown(content, selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB),
-                ]),
-                padding=15,
-            ),
+        who = "Você" if is_user else "Grok"
+        timestamp = datetime.now().strftime("%H:%M")
+        header = f"{who} • {timestamp}"
+        bg = "#303030" if self.config_manager.get("theme_dark") else "#ffffff"
+        card = self.create_message_card(
+            header,
+            content,
+            bg,
             elevation=2,
+            enable_copy_buttons=not is_user,
         )
-        self.chat_container.controls.append(message_card)
-        self.page.update()
-    
+        self.remove_chat_stretch()
+        self.chat_cards_layout.addWidget(card)
+        self.restore_chat_stretch()
+        self.scroll_to_bottom()
+
+    def _rtf_escape(self, text: str) -> str:
+        """Escapa texto para RTF com suporte a Unicode."""
+        output = []
+        for ch in str(text or ""):
+            code = ord(ch)
+            if ch == "\\":
+                output.append("\\\\")
+            elif ch == "{":
+                output.append("\\{")
+            elif ch == "}":
+                output.append("\\}")
+            elif ch == "\t":
+                output.append("\\tab ")
+            elif 32 <= code <= 126:
+                output.append(ch)
+            else:
+                signed = code if code <= 32767 else code - 65536
+                output.append(f"\\u{signed}?")
+        return "".join(output)
+
+    def _format_inline_markdown_rtf(self, text: str) -> str:
+        """Converte marcações inline de Markdown para controles RTF."""
+        result = []
+        s = str(text or "")
+        i = 0
+
+        while i < len(s):
+            if s.startswith("**", i):
+                end = s.find("**", i + 2)
+                if end != -1:
+                    content = self._rtf_escape(s[i + 2:end])
+                    result.append(f"\\b {content}\\b0 ")
+                    i = end + 2
+                    continue
+            if s.startswith("__", i):
+                end = s.find("__", i + 2)
+                if end != -1:
+                    content = self._rtf_escape(s[i + 2:end])
+                    result.append(f"\\b {content}\\b0 ")
+                    i = end + 2
+                    continue
+            if s[i] == "*":
+                end = s.find("*", i + 1)
+                if end != -1:
+                    content = self._rtf_escape(s[i + 1:end])
+                    result.append(f"\\i {content}\\i0 ")
+                    i = end + 1
+                    continue
+            if s[i] == "_":
+                end = s.find("_", i + 1)
+                if end != -1:
+                    content = self._rtf_escape(s[i + 1:end])
+                    result.append(f"\\i {content}\\i0 ")
+                    i = end + 1
+                    continue
+            if s[i] == "`":
+                end = s.find("`", i + 1)
+                if end != -1:
+                    content = self._rtf_escape(s[i + 1:end])
+                    result.append(f"\\f1 {content}\\f0 ")
+                    i = end + 1
+                    continue
+            if s[i] == "[":
+                close_bracket = s.find("]", i + 1)
+                if close_bracket != -1 and close_bracket + 1 < len(s) and s[close_bracket + 1] == "(":
+                    close_paren = s.find(")", close_bracket + 2)
+                    if close_paren != -1:
+                        label = self._rtf_escape(s[i + 1:close_bracket])
+                        url = self._rtf_escape(s[close_bracket + 2:close_paren])
+                        result.append(f"\\ul\\cf1 {label}\\ul0\\cf0  ({url})")
+                        i = close_paren + 1
+                        continue
+
+            next_special = len(s)
+            for marker in ("**", "__", "*", "_", "`", "["):
+                pos = s.find(marker, i + 1)
+                if pos != -1:
+                    next_special = min(next_special, pos)
+
+            result.append(self._rtf_escape(s[i:next_special]))
+            i = next_special
+
+        return "".join(result)
+
+    def markdown_to_rtf(self, markdown_text: str) -> str:
+        """Converte markdown para RTF preservando formatações principais."""
+        lines = str(markdown_text or "").splitlines()
+        rtf_lines: List[str] = []
+        in_code_block = False
+
+        for raw_line in lines:
+            line = raw_line.rstrip("\n")
+            stripped = line.strip()
+
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                continue
+
+            if in_code_block:
+                rtf_lines.append(f"\\pard\\li480\\f1 {self._rtf_escape(line)}\\f0\\li0\\par")
+                continue
+
+            if not stripped:
+                rtf_lines.append("\\par")
+                continue
+
+            heading = re.match(r"^(#{1,6})\\s+(.*)$", stripped)
+            if heading:
+                level = len(heading.group(1))
+                text = heading.group(2)
+                size_map = {1: 36, 2: 32, 3: 28, 4: 26, 5: 24, 6: 22}
+                fs = size_map.get(level, 22)
+                rtf_lines.append(f"\\pard\\b\\fs{fs} {self._format_inline_markdown_rtf(text)}\\b0\\fs22\\par")
+                continue
+
+            unordered = re.match(r"^\s*[-*+]\s+(.*)$", line)
+            if unordered:
+                item = unordered.group(1)
+                rtf_lines.append(f"\\pard\\li360\\tx360 \\bullet\\tab {self._format_inline_markdown_rtf(item)}\\par")
+                continue
+
+            ordered = re.match(r"^\s*(\d+)\.\s+(.*)$", line)
+            if ordered:
+                num = ordered.group(1)
+                item = ordered.group(2)
+                rtf_lines.append(f"\\pard\\li360\\tx360 {num}.\\tab {self._format_inline_markdown_rtf(item)}\\par")
+                continue
+
+            quote = re.match(r"^\s*>\s?(.*)$", line)
+            if quote:
+                rtf_lines.append(f"\\pard\\li480\\i {self._format_inline_markdown_rtf(quote.group(1))}\\i0\\li0\\par")
+                continue
+
+            if re.match(r"^\s*([-*_])\1{2,}\s*$", stripped):
+                rtf_lines.append("\\pard\\qc ________________________________\\par\\pard")
+                continue
+
+            rtf_lines.append(f"\\pard {self._format_inline_markdown_rtf(line)}\\par")
+
+        header = (
+            "{\\rtf1\\ansi\\deff0\n"
+            "{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}\n"
+            "{\\colortbl ;\\red0\\green102\\blue204;}\n"
+        )
+        body = "\n".join(rtf_lines)
+        return header + body + "\n}"
+
+    def copy_text_as_md(self, markdown_text: str):
+        """Copia texto markdown para o clipboard."""
+        try:
+            pyperclip.copy(str(markdown_text or ""))
+            self.response_status_text.setText("Resposta copiada em MD.")
+        except Exception as ex:
+            self.add_system_message(f"❌ Erro ao copiar MD: {ex}")
+
+    def copy_text_as_rtf(self, markdown_text: str):
+        """Copia texto em formato RTF para o clipboard."""
+        try:
+            rtf_text = self.markdown_to_rtf(markdown_text)
+            pyperclip.copy(rtf_text)
+            self.response_status_text.setText("Resposta copiada em RTF.")
+        except Exception as ex:
+            self.add_system_message(f"❌ Erro ao copiar RTF: {ex}")
+
     def add_system_message(self, content: str):
         """Adiciona mensagem do sistema."""
-        system_card = ft.Card(
-            content=ft.Container(
-                content=ft.Markdown(content, selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB),
-                padding=15,
-                bgcolor="#1a1a1a" if self.config_manager.get("theme_dark") else "#f0f0f0",
-            ),
-            elevation=1,
-        )
-        self.chat_container.controls.append(system_card)
-        self.page.update()
-    
-    def clear_chat(self, e):
+        bg = "#1a1a1a" if self.config_manager.get("theme_dark") else "#f0f0f0"
+        card = self.create_message_card("", content, bg, elevation=1)
+        self.remove_chat_stretch()
+        self.chat_cards_layout.addWidget(card)
+        self.restore_chat_stretch()
+        self.scroll_to_bottom()
+
+    def clear_chat(self, *_):
         """Limpa o chat."""
-        self.chat_container.controls.clear()
+        self.clear_chat_cards()
         self.messages.clear()
         self.attached_files.clear()
         self.add_system_message("🔄 Chat resetado.")
-        self.page.update()
-    
-    def copy_chat(self, e):
+
+    def copy_chat(self, *_):
         """Copia chat para o clipboard."""
         chat_text = [f"[{'USUÁRIO' if msg['role'] == 'user' else 'GROK'}]\n{msg['content']}\n" for msg in self.messages]
         try:
@@ -602,93 +972,109 @@ class PrecedentSearchApp:
             self.add_system_message("✅ Chat copiado!")
         except Exception as ex:
             self.add_system_message(f"❌ Erro ao copiar: {ex}")
-    
-    async def attach_file(self, e):
+
+    def attach_file(self, *_):
         """Anexa um arquivo."""
-        # Criar janela tkinter temporária e trazer para frente
-        def open_file_dialog():
-            root = tk.Tk()
-            root.withdraw()  # Esconder janela principal
-            root.attributes('-topmost', True)  # Trazer para frente
-            root.lift()
-            root.focus_force()
-            files = filedialog.askopenfilenames(
-                parent=root,
-                title="Selecione os arquivos para anexar",
-                filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md"), ("All files", "*.*")]
-            )
-            root.destroy()
-            return files
-        
         try:
-            # Usar tkinter filedialog em thread separada para não bloquear
-            files = await asyncio.to_thread(open_file_dialog)
-            
+            files, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Selecione os arquivos para anexar",
+                "",
+                "Text files (*.txt);;Markdown files (*.md);;All files (*.*)",
+            )
             if files:
                 for file_path in files:
-                    if file_path:
-                        self.attached_files.append(str(file_path))
-                        file_name = os.path.basename(file_path)
-                        self.add_system_message(f"📎 Arquivo anexado: {file_name}")
-                self.page.update()
+                    self.attached_files.append(str(file_path))
+                    file_name = os.path.basename(file_path)
+                    self.add_system_message(f"📎 Arquivo anexado: {file_name}")
         except Exception as ex:
             print(f"Erro ao anexar arquivo: {ex}")
             self.add_system_message(f"❌ Erro ao anexar arquivo: {ex}")
-    
-    async def send_message_click(self, e):
-        """Ponte para chamada async."""
-        await self.send_message(e)
 
-    async def send_message(self, e):
+    def create_typing_card(self) -> QWidget:
+        """Cria cartão temporário de digitação."""
+        bg = "#303030" if self.config_manager.get("theme_dark") else "#ffffff"
+        timestamp = datetime.now().strftime("%H:%M")
+        return self.create_message_card(f"Grok • {timestamp}", "digitando...", bg, elevation=2)
+
+    def create_loading_card(self) -> QWidget:
+        """Cria card de progresso durante consulta."""
+        card = QFrame()
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        card.setStyleSheet("QFrame { border: 1px solid #444; border-radius: 6px; background-color: transparent; }")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(12, 8, 12, 8)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        bar.setTextVisible(False)
+        layout.addWidget(bar)
+        return card
+
+    def send_message_click(self, *_):
+        """Inicia envio da mensagem."""
+        self.send_message()
+
+    def send_message(self):
         """Envia uma mensagem."""
-        user_message = str(self.message_input.value or "").strip()
+        user_message = self.message_input.toPlainText().strip()
         if not user_message or not self.config_manager.get("api_key"):
             return
-        
+
         self.add_message(user_message, is_user=True)
-        self.message_input.value = ""
-        self.response_status_text.value = "Preparando consulta..."
-        self.response_status_ring.visible = True
-        typing_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            controls=[
-                                ft.Icon(icon=ft.Icons.SMART_TOY, size=20),
-                                ft.Text(value="Grok", weight=ft.FontWeight.BOLD, size=14),
-                                ft.Text(value=datetime.now().strftime("%H:%M"), size=12, color="grey"),
-                            ]
-                        ),
-                        ft.Text(value="digitando..."),
-                    ]
-                ),
-                padding=15,
-            ),
-            elevation=2,
+        self.message_input.setPlainText("")
+        self.response_status_text.setText("Preparando consulta...")
+        self.response_status_ring.setVisible(True)
+
+        self.typing_card = self.create_typing_card()
+        self.loading_card = self.create_loading_card()
+        self.remove_chat_stretch()
+        self.chat_cards_layout.addWidget(self.typing_card)
+        self.chat_cards_layout.addWidget(self.loading_card)
+        self.restore_chat_stretch()
+        self.scroll_to_bottom()
+
+        history_before = list(self.messages)
+        self.messages.append({"role": "user", "content": user_message})
+
+        collection_id = str(self.collection_dropdown.currentData() or "")
+        self.response_status_text.setText("Consultando o modelo...")
+
+        worker = Worker(
+            self._perform_request,
+            user_message,
+            history_before,
+            list(self.attached_files),
+            collection_id,
         )
-        self.chat_container.controls.append(typing_card)
-        self.page.update()
-        
+        worker.signals.finished.connect(self._on_send_finished)
+        self.thread_pool.start(worker)
+
+    def _perform_request(
+        self,
+        user_message: str,
+        history_before: List[Dict[str, str]],
+        attached_files: List[str],
+        collection_id: str,
+    ) -> Dict[str, str]:
+        """Executa busca semântica + completion em background."""
         messages = [{"role": "system", "content": str(self.config_manager.get("system_prompt") or "")}]
-        if self.attached_files:
+
+        if attached_files:
             ctx = "Arquivos anexados:\n"
-            for f in self.attached_files:
+            for f in attached_files:
                 try:
                     with open(f, 'r', encoding='utf-8') as f_content:
                         ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:50000000]}\n"
-                except Exception: pass
+                except Exception:
+                    pass
             messages.append({"role": "system", "content": ctx})
 
-        collection_id = str(self.collection_dropdown.value or "")
+        search_error = ""
         if not collection_id:
-            self.add_system_message("⚠️ Nenhuma collection selecionada. A busca será realizada sem contexto de collection.")
+            search_error = "⚠️ Nenhuma collection selecionada. A busca será realizada sem contexto de collection."
         elif self.xai_client:
-            results = await asyncio.to_thread(
-                self.xai_client.search_documents,
-                user_message,
-                collection_id,
-            )
+            results = self.xai_client.search_documents(user_message, collection_id)
+
             if results:
                 snippets = []
                 for idx, item in enumerate(results[:5], start=1):
@@ -704,129 +1090,143 @@ class PrecedentSearchApp:
                     messages.append({"role": "system", "content": search_ctx})
             else:
                 if self.xai_client.last_search_error:
-                    self.add_system_message(f"⚠️ Busca semantica falhou: {self.xai_client.last_search_error}")
-        
-        messages.extend(self.messages)
+                    search_error = f"⚠️ Busca semantica falhou: {self.xai_client.last_search_error}"
+
+        messages.extend(history_before)
         messages.append({"role": "user", "content": user_message})
-        self.messages.append({"role": "user", "content": user_message})
-        
-        loading = ft.ProgressBar()
-        self.chat_container.controls.append(loading)
-        self.response_status_text.value = "Consultando o modelo..."
-        self.response_status_ring.visible = True
-        self.page.update()
-        
+
         try:
             if not self.xai_client:
                 raise Exception("Cliente não inicializado")
 
             # Nota: code_execution removido temporariamente (API retorna 422)
             # TODO: Investigar formato correto de tools na documentação xAI
-            response = await asyncio.to_thread(
-                self.xai_client.chat_completion,
+            response = self.xai_client.chat_completion(
                 messages,
                 str(self.config_manager.get("model") or "grok-2-1212"),
                 float(self.config_manager.get("temperature") or 0.7),
-                None,  # tools desabilitado
+                None,
             )
             ans = str(response["choices"][0]["message"]["content"])
+            return {"answer": ans, "error": "", "search_error": search_error}
+        except Exception as ex:
+            return {"answer": "", "error": str(ex), "search_error": search_error}
+
+    def _on_send_finished(self, result: Dict[str, str]):
+        """Finaliza atualização de UI após resposta da API."""
+        if self.typing_card is not None:
+            self.typing_card.deleteLater()
+            self.typing_card = None
+        if self.loading_card is not None:
+            self.loading_card.deleteLater()
+            self.loading_card = None
+        self.scroll_to_bottom()
+
+        if result.get("search_error"):
+            self.add_system_message(result["search_error"])
+
+        if result.get("error"):
+            self.add_system_message(f"❌ Erro: {result['error']}")
+        else:
+            ans = str(result.get("answer") or "")
             self.add_message(ans, is_user=False)
             self.messages.append({"role": "assistant", "content": ans})
-        except Exception as ex:
-            self.add_system_message(f"❌ Erro: {ex}")
-        finally:
-            if typing_card in self.chat_container.controls:
-                self.chat_container.controls.remove(typing_card)
-            self.chat_container.controls.remove(loading)
-            self.response_status_text.value = ""
-            self.response_status_ring.visible = False
-            self.page.update()
-    
-    def open_settings(self, e):
-        """Abre o diálogo de configurações."""
-        m_key = ft.TextField()
-        m_key.label = "Management Key"
-        m_key.value = str(self.config_manager.get("management_key") or "")
-        m_key.password = True
-        m_key.can_reveal_password = True
 
-        a_key = ft.TextField()
-        a_key.label = "API Key"
-        a_key.value = str(self.config_manager.get("api_key") or "")
-        a_key.password = True
-        a_key.can_reveal_password = True
-        model = ft.Dropdown()
-        model.label = "Modelo"
-        model.value = str(self.config_manager.get("model") or "")
-        model.options = []
-        model_status = ft.Text("Clique para atualizar modelos.", size=12, color="grey")
-        refresh_models_button = ft.IconButton(
-            icon=ft.Icons.REFRESH,
-            tooltip="Atualizar modelos",
-            on_click=lambda e: self.refresh_models(model, model_status),
-        )
-        temp = ft.Slider()
-        temp.min = 0
-        temp.max = 2
-        temp.divisions = 20
-        temp.value = float(self.config_manager.get("temperature") or 0.7)
-        temp.label = "Temp: {value}"
-        sys_p = ft.TextField()
-        sys_p.label = "System Prompt"
-        sys_p.value = str(self.config_manager.get("system_prompt") or "")
-        sys_p.multiline = True
-        theme = ft.Switch()
-        theme.label = "Tema Escuro"
-        theme.value = bool(self.config_manager.get("theme_dark"))
-        
-        def save(e):
-            self.config_manager.set("management_key", m_key.value)
-            self.config_manager.set("api_key", a_key.value)
-            self.config_manager.set("model", model.value)
-            self.config_manager.set("temperature", temp.value)
-            self.config_manager.set("system_prompt", sys_p.value)
-            self.config_manager.set("theme_dark", theme.value)
+        self.response_status_text.setText("")
+        self.response_status_ring.setVisible(False)
+        self.scroll_to_bottom()
+
+    def open_settings(self, *_):
+        """Abre o diálogo de configurações."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Configurações")
+        dlg.resize(700, 560)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        m_key_label = QLabel("Management Key")
+        m_key = QLineEdit(str(self.config_manager.get("management_key") or ""))
+        m_key.setEchoMode(QLineEdit.EchoMode.Password)
+
+        a_key_label = QLabel("API Key")
+        a_key = QLineEdit(str(self.config_manager.get("api_key") or ""))
+        a_key.setEchoMode(QLineEdit.EchoMode.Password)
+
+        model_label = QLabel("Modelo")
+        model = QComboBox()
+        model.setEditable(False)
+
+        model_status = QLabel("Clique para atualizar modelos.")
+        model_status.setObjectName("statusLabel")
+
+        refresh_models_button = QToolButton()
+        refresh_models_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        refresh_models_button.setToolTip("Atualizar modelos")
+        refresh_models_button.clicked.connect(lambda: self.refresh_models(model, model_status))
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(model, 1)
+        model_row.addWidget(refresh_models_button)
+
+        temp_label = QLabel("Temperature: 0.00")
+        temp_slider = QSlider(Qt.Orientation.Horizontal)
+        temp_slider.setMinimum(0)
+        temp_slider.setMaximum(20)
+        current_temp = float(self.config_manager.get("temperature") or 0.7)
+        temp_slider.setValue(int(round(current_temp * 10)))
+        temp_label.setText(f"Temperature: {temp_slider.value() / 10:.2f}")
+        temp_slider.valueChanged.connect(lambda v: temp_label.setText(f"Temperature: {v / 10:.2f}"))
+
+        sys_p_label = QLabel("System Prompt")
+        sys_p = QTextEdit()
+        sys_p.setPlainText(str(self.config_manager.get("system_prompt") or ""))
+        sys_p.setMinimumHeight(160)
+
+        theme = QCheckBox("Tema Escuro")
+        theme.setChecked(bool(self.config_manager.get("theme_dark")))
+
+        save_button = QPushButton("Salvar")
+
+        def save():
+            self.config_manager.set("management_key", m_key.text())
+            self.config_manager.set("api_key", a_key.text())
+            self.config_manager.set("model", model.currentText())
+            self.config_manager.set("temperature", temp_slider.value() / 10)
+            self.config_manager.set("system_prompt", sys_p.toPlainText())
+            self.config_manager.set("theme_dark", theme.isChecked())
             self.update_xai_client()
-            self.page.theme_mode = ft.ThemeMode.DARK if theme.value else ft.ThemeMode.LIGHT
+            self.apply_theme()
             self.refresh_collections()
-            self.close_dialog(dlg)
-            self.page.update()
-            
-        dlg = ft.AlertDialog()
-        dlg.title = ft.Text("Configurações")
-        dlg.content = ft.Column(
-            [
-                m_key,
-                a_key,
-                ft.Row([model, refresh_models_button], spacing=10),
-                model_status,
-                ft.Text("Temperature:"),
-                temp,
-                sys_p,
-                theme,
-            ],
-            scroll=ft.ScrollMode.AUTO,
-            height=400,
-        )
-        dlg.actions = [ft.Button(content=ft.Text("Salvar"), on_click=save)]
-        self.open_dialog(dlg)
+            dlg.accept()
+
+        save_button.clicked.connect(save)
+
+        layout.addWidget(m_key_label)
+        layout.addWidget(m_key)
+        layout.addWidget(a_key_label)
+        layout.addWidget(a_key)
+        layout.addWidget(model_label)
+        layout.addLayout(model_row)
+        layout.addWidget(model_status)
+        layout.addWidget(temp_label)
+        layout.addWidget(temp_slider)
+        layout.addWidget(sys_p_label)
+        layout.addWidget(sys_p)
+        layout.addWidget(theme)
+        layout.addWidget(save_button)
+
         self.update_xai_client()
         self.refresh_models(model, model_status)
-
-    def open_dialog(self, dlg):
-        """Abre o diálogo."""
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-    def close_dialog(self, dlg):
-        """Fecha o diálogo."""
-        dlg.open = False
-        self.page.update()
+        dlg.exec()
 
 
-def main(page: ft.Page):
-    PrecedentSearchApp(page)
+def main():
+    app = QApplication(sys.argv)
+    window = PrecedentSearchApp()
+    window.show()
+    return app.exec()
 
 if __name__ == "__main__":
-    ft.run(main)
+    sys.exit(main())

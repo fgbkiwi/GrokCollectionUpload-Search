@@ -2,7 +2,7 @@
 # Baseline validado em Python 3.12
 
 # Framework de UI
-flet==0.80.5
+PyQt6==6.8.1
 
 # HTTP requests para xAI API
 requests==2.32.5
