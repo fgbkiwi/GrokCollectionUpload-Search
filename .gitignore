@@ -53,6 +53,13 @@ env/
 # These are patterns to watch out for in file names
 # * : ? " < > |
 
+# Credentials and Local Config
+config.json
+app_config.json
+*.key
+*.pem
+.env
+
 # Data/Temporary
 sentencas_md_test/
 uploaded_files/
