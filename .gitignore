@@ -42,31 +42,27 @@ desktop.ini
 
 # Virtual Environments
 .venv/
-venv/
-env/
 
-# OS Specific
-.DS_Store
-Thumbs.db
-desktop.ini
 # Linux specific/conflictual files
 *.sh
 *.bin
 .config/
 .local/
 .cache/
+
 # Flutter Linux build artifacts
 collection_uploader_app/linux/
-# Windows incompatible characters handled by git usually, but listed for safety
-# * : ? " < > |
 
 # Credentials and Local Config
 config.json
 app_config.json
+settings.json
+.vscode/settings.json
 *.key
 *.pem
 .env
-# Ignore local testing scripts if they are not part of core repo
+
+# Local testing scripts (not core repo)
 test_xaiclient.py
 diagnose_connection.py
 
@@ -80,6 +76,4 @@ MDs_output/
 *.bak
 temp/
 tmp/
-sentencas_md_test_sample/0001_0000006_44_2021_5_10_0009_CONSIGNAÇÃO.md
-sentencas_md_test_sample/0002_0000006_44_2021_5_10_0009_JUSTIÇA_GRATUITA.md
-sentencas_md_test_sample/0003_0000006_73_2023_5_10_0009_ATIVIDADE_DE_PROFESSOR_CARACTERIZAÇÃO_part01.md
+sentencas_md_test_sample/
