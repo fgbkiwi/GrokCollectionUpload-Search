@@ -8,4 +8,5 @@ PyQt6==6.11.0
 requests==2.33.1
 
 # Clipboard para copiar chat
-pyperclip==1.11.0
+# pyperclip removido em favor do QClipboard nativo do PyQt6
+# pyperclip==1.11.0

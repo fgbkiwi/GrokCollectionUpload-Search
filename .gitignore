@@ -45,12 +45,19 @@ desktop.ini
 venv/
 env/
 
-# IDEs
-.vscode/settings.json
-.idea/
-
-# Windows Incompatible Characters (to be safe, though git handles them mostly)
-# These are patterns to watch out for in file names
+# OS Specific
+.DS_Store
+Thumbs.db
+desktop.ini
+# Linux specific/conflictual files
+*.sh
+*.bin
+.config/
+.local/
+.cache/
+# Flutter Linux build artifacts
+collection_uploader_app/linux/
+# Windows incompatible characters handled by git usually, but listed for safety
 # * : ? " < > |
 
 # Credentials and Local Config
@@ -59,6 +66,9 @@ app_config.json
 *.key
 *.pem
 .env
+# Ignore local testing scripts if they are not part of core repo
+test_xaiclient.py
+diagnose_connection.py
 
 # Data/Temporary
 sentencas_md_test/

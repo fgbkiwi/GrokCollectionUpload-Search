@@ -7,9 +7,9 @@
 ## 📋 Índice
 
 1. [Componentes do Sistema](#componentes-do-sistema)
-2. [Collection Uploader UI (Flet)](#collection-uploader-ui-flet)
+2. [Collection Uploader UI (PyQt6)](#collection-uploader-ui-pyqt6)
 3. [Collection Uploader CLI (Python)](#collection-uploader-cli-python)
-4. [Precedente Search App (Flet)](#precedente-search-app-flet)
+4. [Precedente Search App (PyQt6)](#precedente-search-app-pyqt6)
 5. [Formato de Dados](#formato-de-dados)
 6. [Configuração de Collections](#configuração-de-collections)
 7. [Perguntas Frequentes](#perguntas-frequentes)
@@ -22,10 +22,10 @@ Este sistema possui **3 componentes principais**:
 
 | Componente | Interface | Função | Quando Usar |
 |------------|-----------|--------|-------------|
-| **MD Generation UI (V3)** | Flet (GUI) | Gerar MD + metadados | Geracao de arquivos com IA |
-| **Collection Uploader UI (V3)** | Flet (GUI) | Upload de documentos | Envio com validacao de metadados |
+| **MD Generation UI (V3)** | PyQt6 (GUI) | Gerar MD + metadados | Geracao de arquivos com IA |
+| **Collection Uploader UI (V3)** | PyQt6 (GUI) | Upload de documentos | Envio com validacao de metadados |
 | **Collection Uploader CLI** | Terminal | Upload de documentos | Automação, scripts, lotes grandes |
-| **Precedente Search App** | Flet (GUI) | Busca de precedentes | Consultas interativas, chat com Grok |
+| **Precedente Search App** | PyQt6 (GUI) | Busca de precedentes | Consultas interativas, chat com Grok |
 
 ---
 
@@ -174,7 +174,7 @@ Tempo médio por sentença:       6.25s
 
 ---
 
-## Precedente Search App (Flet)
+## Precedente Search App (PyQt6)
 
 ### Instalação e Execução
 
