@@ -9,10 +9,12 @@ import requests
 import os
 import sys
 import re
+import time
+import logging
+import socket
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import pyperclip
 from PyQt6.QtCore import Qt, QThreadPool, QRunnable, QObject, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
@@ -38,6 +40,37 @@ from PyQt6.QtWidgets import (
     QStyle,
     QScrollArea,
 )
+
+
+# Configuração de Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app_debug.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("PrecedentSearchApp")
+
+
+def check_network_connectivity(host="8.8.8.8", port=53, timeout=3):
+    """Verifica conectividade básica de rede."""
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
+
+
+def check_api_reachability(url="https://api.x.ai/v1/models", timeout=5):
+    """Verifica se o endpoint da API está acessível."""
+    try:
+        response = requests.get(url, timeout=timeout)
+        return True, response.status_code
+    except Exception as e:
+        return False, str(e)
 
 
 class ConfigManager:
@@ -92,74 +125,137 @@ class XAIClient:
         self.api_key = api_key
         self.management_key = management_key
         self.base_url = "https://api.x.ai/v1"
+        self.mgmt_url = "https://management-api.x.ai/v1"
         self.last_collections_error = ""
         self.last_models_error = ""
         self.last_search_error = ""
         self.headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "PrecedentSearchApp/1.0"
         }
-    
+        logger.info("XAIClient inicializado")
+
+    def validate_keys(self) -> Dict[str, bool]:
+        """Verifica se as chaves API e Management são válidas."""
+        results = {"api": False, "management": False}
+        
+        # Testar API Key
+        try:
+            resp = requests.get(f"{self.base_url}/models", headers=self.headers, timeout=10)
+            results["api"] = (resp.status_code == 200)
+            if not results["api"]:
+                logger.warning(f"Validação da API Key falhou: Status {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Erro ao validar API Key: {e}")
+            
+        # Testar Management Key
+        if self.management_key:
+            try:
+                mgmt_headers = {
+                    "Authorization": f"Bearer {self.management_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "PrecedentSearchApp/1.0"
+                }
+                resp = requests.get(f"{self.mgmt_url}/collections", headers=mgmt_headers, timeout=10)
+                results["management"] = (resp.status_code == 200)
+                if not results["management"]:
+                    logger.warning(f"Validação da Management Key falhou: Status {resp.status_code}")
+            except Exception as e:
+                logger.error(f"Erro ao validar Management Key: {e}")
+        
+        return results
+
+    def _log_request_error(self, method: str, url: str, response: Optional[requests.Response], error: Exception):
+        """Loga detalhes de um erro de requisição."""
+        error_msg = f"Erro na requisição {method} {url}: {str(error)}"
+        if response is not None:
+            error_msg += f"\nStatus Code: {response.status_code}"
+            error_msg += f"\nHeaders: {dict(response.headers)}"
+            
+            # Tratamento específico para erros comuns
+            if response.status_code == 401:
+                error_msg += "\n[DICA]: Erro 401 indica chave inválida, expirada ou falta de permissão."
+            elif response.status_code == 403:
+                error_msg += "\n[DICA]: Erro 403 indica acesso proibido. Verifique se sua conta tem acesso a este endpoint ou região."
+            
+            try:
+                error_msg += f"\nCorpo: {response.text[:500]}"
+            except:
+                pass
+        logger.error(error_msg)
+
+    def _check_all_connectivity(self):
+        """Verifica múltiplos pontos de conectividade."""
+        results = {
+            "google_dns": check_network_connectivity("8.8.8.8", 53),
+            "cloudflare_dns": check_network_connectivity("1.1.1.1", 53),
+            "xai_api": check_api_reachability("https://api.x.ai/v1/models")[0],
+            "xai_mgmt": check_api_reachability("https://management-api.x.ai/v1/collections")[0],
+            "google_http": check_api_reachability("https://www.google.com")[0]
+        }
+        logger.info(f"Status de conectividade: {results}")
+        return results
+
     def list_collections(self) -> List[Dict]:
-        """Lista todas as Collections disponíveis."""
+        """Lista todas as Collections disponíveis usando a Management API."""
         if not self.management_key:
             self.last_collections_error = "Management Key não configurada."
+            logger.warning(self.last_collections_error)
             return []
 
+        headers = {
+            "Authorization": f"Bearer {self.management_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "PrecedentSearchApp/1.0"
+        }
+        
+        # O endpoint correto para Management Key é estritamente via management-api.x.ai
+        url = f"{self.mgmt_url}/collections"
+        
         try:
-            headers = {
-                "Authorization": f"Bearer {self.management_key}",
-                "Content-Type": "application/json"
-            }
-            urls_to_try = [
-                "https://management-api.x.ai/v1/collections",
-                "https://api.x.ai/v1/collections",
-                "https://management-api.x.ai/v1/collections/list",
-                "https://api.x.ai/collections",
-                "https://management-api.x.ai/collections",
-                "https://api.x.ai/v1/collections/list",
-                "https://management-api.x.ai/collections/list",
-            ]
+            logger.info(f"Tentando listar collections via: {url}")
+            response = requests.get(url, headers=headers, timeout=15)
 
-            response = None
-            last_error = None
+            if response.status_code == 200:
+                data = response.json()
+                collections = []
+                if isinstance(data, list):
+                    collections = data
+                elif isinstance(data, dict):
+                    if isinstance(data.get("data"), list):
+                        collections = data["data"]
+                    elif isinstance(data.get("collections"), list):
+                        collections = data["collections"]
+                
+                if collections:
+                    logger.info(f"Sucesso ao listar {len(collections)} collections")
+                    return collections
+                else:
+                    logger.info("Nenhuma collection encontrada.")
+                    return []
 
-            for url in urls_to_try:
-                try:
-                    use_headers = "management-api" in url
-                    response = requests.get(
-                        url,
-                        headers=headers if use_headers else {},
-                        timeout=15
-                    )
-
-                    if response.status_code != 200:
-                        last_error = f"{response.status_code}: {response.text[:200]}"
-                        continue
-
-                    data = response.json()
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        if isinstance(data.get("data"), list):
-                            return data["data"]
-                        if isinstance(data.get("collections"), list):
-                            return data["collections"]
-                    last_error = "Formato de resposta não reconhecido"
-                except Exception as ex:
-                    last_error = str(ex)
-                    continue
-
-            if response:
-                self.last_collections_error = last_error or f"{response.status_code}: {response.text[:200]}"
+            if response.status_code == 401:
+                self.last_collections_error = "Management Key inválida ou expirada."
+            elif response.status_code == 403:
+                self.last_collections_error = "Acesso negado à Management API (403)."
             else:
-                self.last_collections_error = last_error or "Nenhum endpoint funcionou"
-            print(f"Erro ao listar collections: {self.last_collections_error}")
-            return []
-        except Exception as e:
-            self.last_collections_error = str(e)
-            print(f"Erro ao listar collections: {e}")
-            return []
+                self.last_collections_error = f"Erro ao carregar collections (Status {response.status_code})."
+            
+            self._log_request_error("GET", url, response, Exception(self.last_collections_error))
+        
+        except requests.exceptions.ConnectionError as ex:
+            self.last_collections_error = "Erro de conexão com o servidor da xAI."
+            logger.error(f"{self.last_collections_error}: {str(ex)}")
+        except Exception as ex:
+            self.last_collections_error = f"Erro inesperado: {str(ex)}"
+            self._log_request_error("GET", url, None, ex)
+
+        return []
+
 
     def list_models(self) -> List[str]:
         """Lista modelos disponíveis."""
@@ -168,16 +264,13 @@ class XAIClient:
             return []
 
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
             response = requests.get(
                 f"{self.base_url}/models",
-                headers=headers,
+                headers=self.headers,
                 timeout=10
             )
             if response.status_code != 200:
+                self._log_request_error("GET", f"{self.base_url}/models", response, Exception("Status != 200"))
                 self.last_models_error = f"{response.status_code}: {response.text[:200]}"
                 return []
 
@@ -186,102 +279,140 @@ class XAIClient:
             model_ids = [str(m["id"]) for m in models if isinstance(m, dict) and m.get("id") is not None]
             return model_ids
         except Exception as e:
+            self._log_request_error("GET", f"{self.base_url}/models", None, e)
             self.last_models_error = str(e)
+            self._check_all_connectivity()
             return []
 
-    def search_documents(self, query: str, collection_id: str) -> List[Dict[str, Any]]:
-        """Busca documentos em uma collection usando busca semantica."""
+    def search_documents(self, query: str, collection_id: str, max_retries: int = 3) -> List[Dict[str, Any]]:
+        """Busca documentos em uma collection usando busca semântica com suporte a retentativas exponenciais."""
         if not self.api_key:
             self.last_search_error = "API Key não configurada."
             return []
 
-        try:
-            payload = {
-                "query": query,
-                "source": {"collection_ids": [collection_id]},
-                "retrieval_mode": {"type": "semantic"},
-            }
-            response = requests.post(
-                f"{self.base_url}/documents/search",
-                headers=self.headers,
-                json=payload,
-                timeout=20,
-            )
-            if response.status_code != 200:
-                self.last_search_error = f"{response.status_code}: {response.text[:200]}"
-                return []
+        payload = {
+            "query": query,
+            "source": {"collection_ids": [collection_id]},
+            "retrieval_mode": {"type": "semantic"},
+        }
 
-            data = response.json()
-            if isinstance(data, dict):
-                if isinstance(data.get("data"), list):
-                    return data["data"]
-                if isinstance(data.get("results"), list):
-                    return data["results"]
-                if isinstance(data.get("matches"), list):
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    wait_time = (2 ** attempt) + (time.time() % 1) # Exponential backoff with jitter
+                    logger.info(f"Retentativa de busca {attempt}/{max_retries} em {wait_time:.2f}s...")
+                    time.sleep(wait_time)
+
+                response = requests.post(
+                    f"{self.base_url}/documents/search",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=45,
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info("Busca de documentos realizada com sucesso")
+                    # ... normalização ...
                     normalized = []
-                    for match in data["matches"]:
-                        if not isinstance(match, dict):
-                            continue
-                        doc = match.get("document") if isinstance(match.get("document"), dict) else match
-                        if isinstance(doc, dict):
-                            item = dict(doc)
-                            if "document_id" not in item and "id" in item:
-                                item["document_id"] = item.get("id")
-                            if "score" not in item and "score" in match:
-                                item["score"] = match.get("score")
-                            normalized.append(item)
-                    return normalized
-                nested = data.get("data")
-                if isinstance(nested, dict):
-                    if isinstance(nested.get("results"), list):
-                        return nested["results"]
-                self.last_search_error = f"Formato de resposta nao reconhecido (keys: {list(data.keys())})."
-                return []
-            if isinstance(data, list):
-                return data
-            self.last_search_error = f"Formato de resposta nao reconhecido (type: {type(data)})."
-            return []
-        except Exception as e:
-            self.last_search_error = str(e)
-            return []
-    
+                    results = []
+                    if isinstance(data, dict):
+                        if isinstance(data.get("data"), list):
+                            results = data["data"]
+                        elif isinstance(data.get("results"), list):
+                            results = data["results"]
+                        elif isinstance(data.get("matches"), list):
+                            for match in data["matches"]:
+                                if not isinstance(match, dict): continue
+                                doc = match.get("document") if isinstance(match.get("document"), dict) else match
+                                if isinstance(doc, dict):
+                                    item = dict(doc)
+                                    if "document_id" not in item and "id" in item:
+                                        item["document_id"] = item.get("id")
+                                    if "score" not in item and "score" in match:
+                                        item["score"] = match.get("score")
+                                    normalized.append(item)
+                            return normalized
+                    return results if results else []
+                
+                self._log_request_error("POST", f"{self.base_url}/documents/search", response, Exception(f"Status {response.status_code}"))
+                last_error = f"Erro {response.status_code}: {response.text[:200]}"
+                
+                if response.status_code not in [429, 500, 502, 503, 504]:
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                self._log_request_error("POST", f"{self.base_url}/documents/search", None, e)
+                last_error = f"Erro de conexão na tentativa {attempt + 1}: {str(e)}"
+                if attempt == max_retries:
+                    self._check_all_connectivity()
+
+        self.last_search_error = last_error or "Erro desconhecido na busca."
+        return []
+
     def chat_completion(
         self,
         messages: List[Dict],
         model: str,
         temperature: float,
         tools: Optional[List[Dict]] = None,
-        stream: bool = False
+        stream: bool = False,
+        max_retries: int = 4
     ) -> Any:
-        """Envia requisição de chat completion para a API."""
+        """Envia requisição de chat completion com retry exponencial e logging detalhado."""
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
         }
         
-        if tools:
-            payload["tools"] = tools
+        if tools: payload["tools"] = tools
+        if stream: payload["stream"] = True
         
-        if stream:
-            payload["stream"] = True
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    wait_time = (2 ** attempt) + (time.time() % 1)
+                    logger.info(f"Retentativa de chat {attempt}/{max_retries} em {wait_time:.2f}s...")
+                    time.sleep(wait_time)
+
+                response = requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=120,
+                    stream=stream
+                )
+                
+                if response.status_code != 200:
+                    self._log_request_error("POST", f"{self.base_url}/chat/completions", response, Exception(f"Status {response.status_code}"))
+                    response.raise_for_status()
+                
+                logger.info(f"Chat completion sucesso (tentativa {attempt + 1})")
+                return response if stream else response.json()
+
+            except requests.exceptions.ReadTimeout as e:
+                logger.warning(f"Timeout na tentativa {attempt + 1}")
+                last_exception = Exception(f"Timeout de leitura (120s) na tentativa {attempt + 1}. O servidor x.ai está lento.")
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"Erro de conexão na tentativa {attempt + 1}: {str(e)}")
+                last_exception = Exception(f"Erro de conexão na tentativa {attempt + 1}. Verifique sua internet e DNS.")
+                if attempt == max_retries:
+                    self._check_all_connectivity()
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code
+                if status_code in [429, 500, 502, 503, 504]:
+                    last_exception = Exception(f"Erro HTTP {status_code} na tentativa {attempt + 1}: {e.response.text[:200]}")
+                    continue
+                else:
+                    raise Exception(f"Erro HTTP fatal {status_code}: {e.response.text[:200]}")
+            except Exception as e:
+                logger.error(f"Erro inesperado: {str(e)}")
+                raise Exception(f"Erro inesperado na requisição: {str(e)}")
         
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
-                timeout=60,
-                stream=stream
-            )
-            response.raise_for_status()
-            
-            if stream:
-                return response
-            else:
-                return response.json()
-        except Exception as e:
-            raise Exception(f"Erro na requisição: {str(e)}")
+        raise last_exception or Exception("Falha após múltiplas tentativas.")
 
 
 class WorkerSignals(QObject):
@@ -347,18 +478,39 @@ class PrecedentSearchApp(QMainWindow):
             self.xai_client = None
 
     def apply_theme(self):
-        """Aplica tema claro/escuro na janela."""
+        """Aplica tema claro/escuro na janela e em toda a aplicação."""
         is_dark = bool(self.config_manager.get("theme_dark"))
+        app = QApplication.instance()
+        if not app:
+            return
+
         if is_dark:
-            self.setStyleSheet(
-                """
-                QMainWindow { background-color: #1f1f1f; color: #e8e8e8; }
+            style = """
+                QMainWindow, QDialog { background-color: #1f1f1f; color: #e8e8e8; }
                 QWidget { color: #e8e8e8; }
+                
+                /* Área Central e Scroll */
+                QScrollArea, QScrollArea > QWidget > QWidget { background-color: #1f1f1f; border: none; }
+                QScrollArea #qt_scrollarea_viewport { background-color: #1f1f1f; }
+                
+                /* Message Cards */
+                QFrame#messageCard { border-radius: 8px; border: 1px solid #444; }
+                QFrame#messageCard[cardType="user"] { background-color: #303030; }
+                QFrame#messageCard[cardType="assistant"] { background-color: #2b2b2b; }
+                QFrame#messageCard[cardType="system"] { background-color: #1a1a1a; border-color: #333; }
+                QFrame#messageCard[cardType="typing"] { background-color: #2b2b2b; border-style: dashed; }
+                
                 QTextEdit, QTextBrowser, QLineEdit, QComboBox {
                     background-color: #2b2b2b;
                     color: #f0f0f0;
                     border: 1px solid #4a4a4a;
                     border-radius: 4px;
+                    selection-background-color: #404040;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #2b2b2b;
+                    color: #f0f0f0;
+                    selection-background-color: #3d3d3d;
                 }
                 QPushButton, QToolButton {
                     background-color: #333333;
@@ -368,20 +520,53 @@ class PrecedentSearchApp(QMainWindow):
                     padding: 6px;
                 }
                 QPushButton:hover, QToolButton:hover { background-color: #3d3d3d; }
-                QFrame#toolbarFrame { background-color: #333333; }
+                QPushButton:pressed, QToolButton:pressed { background-color: #444444; }
+                QFrame#toolbarFrame { background-color: #333333; border-bottom: 1px solid #444; }
                 QLabel#statusLabel { color: #a0a0a0; }
-                """
-            )
+                QScrollBar:vertical {
+                    border: none;
+                    background: #2b2b2b;
+                    width: 10px;
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #4a4a4a;
+                    min-height: 20px;
+                    border-radius: 5px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+                QCheckBox { spacing: 5px; }
+                QCheckBox::indicator { width: 18px; height: 18px; }
+            """
         else:
-            self.setStyleSheet(
-                """
-                QMainWindow { background-color: #f7f7f7; color: #1a1a1a; }
+            style = """
+                QMainWindow, QDialog { background-color: #f7f7f7; color: #1a1a1a; }
                 QWidget { color: #1a1a1a; }
+
+                /* Área Central e Scroll */
+                QScrollArea, QScrollArea > QWidget > QWidget { background-color: #f7f7f7; border: none; }
+                QScrollArea #qt_scrollarea_viewport { background-color: #f7f7f7; }
+
+                /* Message Cards */
+                QFrame#messageCard { border-radius: 8px; border: 1px solid #ddd; }
+                QFrame#messageCard[cardType="user"] { background-color: #ffffff; }
+                QFrame#messageCard[cardType="assistant"] { background-color: #f9f9f9; }
+                QFrame#messageCard[cardType="system"] { background-color: #f0f0f0; border-color: #e0e0e0; }
+                QFrame#messageCard[cardType="typing"] { background-color: #f9f9f9; border-style: dashed; }
+
                 QTextEdit, QTextBrowser, QLineEdit, QComboBox {
                     background-color: #ffffff;
                     color: #1a1a1a;
                     border: 1px solid #cccccc;
                     border-radius: 4px;
+                    selection-background-color: #e0e0e0;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #ffffff;
+                    color: #1a1a1a;
+                    selection-background-color: #f0f0f0;
                 }
                 QPushButton, QToolButton {
                     background-color: #f5f5f5;
@@ -391,10 +576,30 @@ class PrecedentSearchApp(QMainWindow):
                     padding: 6px;
                 }
                 QPushButton:hover, QToolButton:hover { background-color: #e8e8e8; }
-                QFrame#toolbarFrame { background-color: #f5f5f5; }
+                QPushButton:pressed, QToolButton:pressed { background-color: #d0d0d0; }
+                QFrame#toolbarFrame { background-color: #f5f5f5; border-bottom: 1px solid #ddd; }
                 QLabel#statusLabel { color: #666666; }
-                """
-            )
+                QScrollBar:vertical {
+                    border: none;
+                    background: #f0f0f0;
+                    width: 10px;
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #ccc;
+                    min-height: 20px;
+                    border-radius: 5px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+            """
+        app.setStyleSheet(style)
+        # Forçar atualização de widgets existentes
+        for widget in app.allWidgets():
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+            widget.update()
 
     def create_ui(self):
         """Cria a interface do usuário."""
@@ -427,7 +632,8 @@ class PrecedentSearchApp(QMainWindow):
 
         settings_button = QToolButton()
         settings_button.setToolTip("Configurações")
-        settings_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView))
+        # Usando ícone de ferramenta/configurações padrão do sistema
+        settings_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         settings_button.clicked.connect(self.open_settings)
 
         toolbar_layout.addWidget(clear_button)
@@ -551,16 +757,16 @@ class PrecedentSearchApp(QMainWindow):
         self,
         header_text: str,
         markdown_text: str,
-        bg_color: str,
+        card_type: str = "assistant",
         elevation: int = 2,
         enable_copy_buttons: bool = False,
     ) -> QWidget:
         """Cria cartão visual de mensagem com Markdown selecionável."""
         card = QFrame()
+        card.setObjectName("messageCard")
+        card.setProperty("cardType", card_type)
         card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet(
-            f"QFrame {{ background-color: {bg_color}; border: 1px solid #444; border-radius: 6px; }}"
-        )
+        
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(15, 15, 15, 15)
         card_layout.setSpacing(8)
@@ -603,11 +809,6 @@ class PrecedentSearchApp(QMainWindow):
         self.adjust_text_widget_height(body, markdown_text, self.RESPONSE_BASE_HEIGHT, self.RESPONSE_MAX_MULTIPLIER)
         body.setStyleSheet("background: transparent; border: none;")
         card_layout.addWidget(body)
-
-        if elevation == 1:
-            card.setStyleSheet(
-                f"QFrame {{ background-color: {bg_color}; border: 1px solid #666; border-radius: 6px; }}"
-            )
 
         return card
 
@@ -771,11 +972,11 @@ class PrecedentSearchApp(QMainWindow):
         who = "Você" if is_user else "Grok"
         timestamp = datetime.now().strftime("%H:%M")
         header = f"{who} • {timestamp}"
-        bg = "#303030" if self.config_manager.get("theme_dark") else "#ffffff"
+        card_type = "user" if is_user else "assistant"
         card = self.create_message_card(
             header,
             content,
-            bg,
+            card_type,
             elevation=2,
             enable_copy_buttons=not is_user,
         )
@@ -931,27 +1132,40 @@ class PrecedentSearchApp(QMainWindow):
         body = "\n".join(rtf_lines)
         return header + body + "\n}"
 
+    def _copy_to_clipboard(self, text: str, format_name: str):
+        """Helper para copiar texto para o clipboard com feedback."""
+        try:
+            clipboard = QApplication.clipboard()
+            if not clipboard:
+                raise Exception("Clipboard não disponível")
+            
+            clipboard.setText(str(text or ""))
+            
+            # Feedback visual no label de status
+            self.response_status_text.setText(f"✅ Resposta copiada em {format_name}!")
+            
+            # Limpar feedback após 3 segundos
+            QTimer.singleShot(3000, lambda: self.response_status_text.setText("") if self.response_status_text.text().startswith("✅") else None)
+            
+        except Exception as ex:
+            logging.error(f"Erro ao copiar para clipboard: {ex}")
+            self.add_system_message(f"❌ Erro ao copiar {format_name}: {ex}")
+
     def copy_text_as_md(self, markdown_text: str):
         """Copia texto markdown para o clipboard."""
-        try:
-            pyperclip.copy(str(markdown_text or ""))
-            self.response_status_text.setText("Resposta copiada em MD.")
-        except Exception as ex:
-            self.add_system_message(f"❌ Erro ao copiar MD: {ex}")
+        self._copy_to_clipboard(markdown_text, "MD")
 
     def copy_text_as_rtf(self, markdown_text: str):
         """Copia texto em formato RTF para o clipboard."""
         try:
             rtf_text = self.markdown_to_rtf(markdown_text)
-            pyperclip.copy(rtf_text)
-            self.response_status_text.setText("Resposta copiada em RTF.")
+            self._copy_to_clipboard(rtf_text, "RTF")
         except Exception as ex:
-            self.add_system_message(f"❌ Erro ao copiar RTF: {ex}")
+            self.add_system_message(f"❌ Erro ao processar RTF: {ex}")
 
     def add_system_message(self, content: str):
         """Adiciona mensagem do sistema."""
-        bg = "#1a1a1a" if self.config_manager.get("theme_dark") else "#f0f0f0"
-        card = self.create_message_card("", content, bg, elevation=1)
+        card = self.create_message_card("", content, "system", elevation=1)
         self.remove_chat_stretch()
         self.chat_cards_layout.addWidget(card)
         self.restore_chat_stretch()
@@ -967,11 +1181,7 @@ class PrecedentSearchApp(QMainWindow):
     def copy_chat(self, *_):
         """Copia chat para o clipboard."""
         chat_text = [f"[{'USUÁRIO' if msg['role'] == 'user' else 'GROK'}]\n{msg['content']}\n" for msg in self.messages]
-        try:
-            pyperclip.copy("\n".join(chat_text))
-            self.add_system_message("✅ Chat copiado!")
-        except Exception as ex:
-            self.add_system_message(f"❌ Erro ao copiar: {ex}")
+        self._copy_to_clipboard("\n".join(chat_text), "Chat")
 
     def attach_file(self, *_):
         """Anexa um arquivo."""
@@ -993,15 +1203,15 @@ class PrecedentSearchApp(QMainWindow):
 
     def create_typing_card(self) -> QWidget:
         """Cria cartão temporário de digitação."""
-        bg = "#303030" if self.config_manager.get("theme_dark") else "#ffffff"
         timestamp = datetime.now().strftime("%H:%M")
-        return self.create_message_card(f"Grok • {timestamp}", "digitando...", bg, elevation=2)
+        return self.create_message_card(f"Grok • {timestamp}", "digitando...", "typing", elevation=2)
 
     def create_loading_card(self) -> QWidget:
         """Cria card de progresso durante consulta."""
         card = QFrame()
+        card.setObjectName("messageCard")
+        card.setProperty("cardType", "typing")
         card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet("QFrame { border: 1px solid #444; border-radius: 6px; background-color: transparent; }")
         layout = QHBoxLayout(card)
         layout.setContentsMargins(12, 8, 12, 8)
         bar = QProgressBar()
