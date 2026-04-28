@@ -2,10 +2,10 @@
 # Baseline validado em Python 3.12
 
 # Framework de UI
-PyQt6==6.8.1
+PyQt6==6.11.0
 
 # HTTP requests para xAI API
-requests==2.32.5
+requests==2.33.1
 
 # Clipboard para copiar chat
-pyperclip==1.9.0
+pyperclip==1.11.0
