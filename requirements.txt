@@ -8,4 +8,7 @@ PyQt6==6.11.0
 requests==2.33.1
 
 # Clipboard para copiar chat
-pyperclip==1.9.0
+pyperclip==1.11.0
+
+# Install with: uv pip install -r requirements.txt
+# (pip is not included in .venv — use uv)
