@@ -414,6 +414,90 @@ class XAIClient:
         
         raise last_exception or Exception("Falha após múltiplas tentativas.")
 
+    def responses_with_collection(
+        self,
+        input_messages: List[Dict],
+        model: str,
+        temperature: float,
+        collection_id: str,
+        max_results: int = 10,
+        max_retries: int = 4,
+    ) -> str:
+        """Usa o endpoint /v1/responses com file_search para RAG grounded na collection.
+
+        Conforme documentação oficial (https://docs.x.ai/developers/tools/collections-search):
+        o tool 'file_search' com 'vector_store_ids' faz o modelo buscar automaticamente
+        na collection antes de responder, evitando alucinações.
+
+        Returns:
+            Texto da resposta do assistente com citações embutidas.
+        """
+        payload = {
+            "model": model,
+            "temperature": temperature,
+            "input": input_messages,
+            "tools": [
+                {
+                    "type": "file_search",
+                    "vector_store_ids": [collection_id],
+                    "max_num_results": max_results,
+                }
+            ],
+        }
+
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    wait_time = (2 ** attempt) + (time.time() % 1)
+                    logger.info(f"Retentativa de responses {attempt}/{max_retries} em {wait_time:.2f}s...")
+                    time.sleep(wait_time)
+
+                response = requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=120,
+                )
+
+                if response.status_code != 200:
+                    self._log_request_error("POST", f"{self.base_url}/responses", response, Exception(f"Status {response.status_code}"))
+                    response.raise_for_status()
+
+                data = response.json()
+                logger.info(f"Responses API sucesso (tentativa {attempt + 1})")
+
+                # Extrai o texto da resposta do formato Responses API
+                # output é uma lista de items; procura o item de mensagem do assistente
+                text_parts = []
+                for item in data.get("output", []):
+                    if item.get("type") == "message" and item.get("role") == "assistant":
+                        for content_block in item.get("content", []):
+                            if content_block.get("type") == "output_text":
+                                text_parts.append(content_block.get("text", ""))
+                return "\n".join(text_parts) if text_parts else ""
+
+            except requests.exceptions.ReadTimeout as e:
+                logger.warning(f"Timeout na tentativa {attempt + 1}")
+                last_exception = Exception(f"Timeout de leitura (120s) na tentativa {attempt + 1}.")
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"Erro de conexão na tentativa {attempt + 1}: {str(e)}")
+                last_exception = Exception(f"Erro de conexão na tentativa {attempt + 1}.")
+                if attempt == max_retries:
+                    self._check_all_connectivity()
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code
+                if status_code in [429, 500, 502, 503, 504]:
+                    last_exception = Exception(f"Erro HTTP {status_code} na tentativa {attempt + 1}: {e.response.text[:200]}")
+                    continue
+                else:
+                    raise Exception(f"Erro HTTP fatal {status_code}: {e.response.text[:200]}")
+            except Exception as e:
+                logger.error(f"Erro inesperado: {str(e)}")
+                raise Exception(f"Erro inesperado na requisição: {str(e)}")
+
+        raise last_exception or Exception("Falha após múltiplas tentativas.")
+
 
 class WorkerSignals(QObject):
     """Sinais para worker em background."""
@@ -1266,58 +1350,59 @@ class PrecedentSearchApp(QMainWindow):
         attached_files: List[str],
         collection_id: str,
     ) -> Dict[str, str]:
-        """Executa busca semântica + completion em background."""
-        messages = [{"role": "system", "content": str(self.config_manager.get("system_prompt") or "")}]
+        """Executa completion em background.
+
+        Quando uma collection está selecionada, utiliza o endpoint /v1/responses com o
+        tool 'file_search', conforme documentação oficial xAI. Isso permite que o modelo
+        busque automaticamente na collection antes de responder (RAG grounded), evitando
+        alucinações. Sem collection, usa o chat/completions tradicional.
+        """
+        if not self.xai_client:
+            return {"answer": "", "error": "Cliente não inicializado", "search_error": ""}
+
+        system_prompt = str(self.config_manager.get("system_prompt") or "")
+        model = str(self.config_manager.get("model") or "grok-2-1212")
+        temperature = float(self.config_manager.get("temperature") or 0.7)
+
+        # Constrói lista de mensagens base (sistema + histórico + nova pergunta)
+        base_messages: List[Dict] = [{"role": "system", "content": system_prompt}]
 
         if attached_files:
             ctx = "Arquivos anexados:\n"
             for f in attached_files:
                 try:
                     with open(f, 'r', encoding='utf-8') as f_content:
-                        ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:50000000]}\n"
+                        ctx += f"\n--- {Path(f).name} ---\n{f_content.read()[:5000000]}\n"
                 except Exception:
                     pass
-            messages.append({"role": "system", "content": ctx})
+            base_messages.append({"role": "system", "content": ctx})
+
+        base_messages.extend(history_before)
+        base_messages.append({"role": "user", "content": user_message})
 
         search_error = ""
         if not collection_id:
-            search_error = "⚠️ Nenhuma collection selecionada. A busca será realizada sem contexto de collection."
-        elif self.xai_client:
-            results = self.xai_client.search_documents(user_message, collection_id)
-
-            if results:
-                snippets = []
-                for idx, item in enumerate(results[:5], start=1):
-                    if not isinstance(item, dict):
-                        continue
-                    content = item.get("content") or item.get("text") or item.get("snippet") or ""
-                    title = item.get("name") or item.get("title") or item.get("document_id") or f"Documento {idx}"
-                    content = str(content).strip()
-                    if content:
-                        snippets.append(f"[{idx}] {title}\n{content[:1200]}")
-                if snippets:
-                    search_ctx = "Resultados da busca semantica na collection selecionada:\n\n" + "\n\n".join(snippets)
-                    messages.append({"role": "system", "content": search_ctx})
-            else:
-                if self.xai_client.last_search_error:
-                    search_error = f"⚠️ Busca semantica falhou: {self.xai_client.last_search_error}"
-
-        messages.extend(history_before)
-        messages.append({"role": "user", "content": user_message})
+            search_error = "⚠️ Nenhuma collection selecionada. A resposta será gerada sem contexto de precedentes."
 
         try:
-            if not self.xai_client:
-                raise Exception("Cliente não inicializado")
+            if collection_id:
+                # Caminho principal: Responses API com file_search (RAG grounded)
+                ans = self.xai_client.responses_with_collection(
+                    input_messages=base_messages,
+                    model=model,
+                    temperature=temperature,
+                    collection_id=collection_id,
+                )
+            else:
+                # Fallback: chat/completions sem grounding
+                response = self.xai_client.chat_completion(
+                    base_messages,
+                    model,
+                    temperature,
+                    None,
+                )
+                ans = str(response["choices"][0]["message"]["content"])
 
-            # Nota: code_execution removido temporariamente (API retorna 422)
-            # TODO: Investigar formato correto de tools na documentação xAI
-            response = self.xai_client.chat_completion(
-                messages,
-                str(self.config_manager.get("model") or "grok-2-1212"),
-                float(self.config_manager.get("temperature") or 0.7),
-                None,
-            )
-            ans = str(response["choices"][0]["message"]["content"])
             return {"answer": ans, "error": "", "search_error": search_error}
         except Exception as ex:
             return {"answer": "", "error": str(ex), "search_error": search_error}
