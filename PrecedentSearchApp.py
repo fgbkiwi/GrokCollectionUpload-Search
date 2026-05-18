@@ -294,6 +294,7 @@ class XAIClient:
             "query": query,
             "source": {"collection_ids": [collection_id]},
             "retrieval_mode": {"type": "semantic"},
+            "reasoning": {"effort": "high"},  # High reasoning effort
         }
 
         last_error = None
@@ -365,6 +366,7 @@ class XAIClient:
             "model": model,
             "messages": messages,
             "temperature": temperature,
+            "reasoning": {"effort": "high"},  # High reasoning effort
         }
         
         if tools: payload["tools"] = tools
@@ -443,6 +445,7 @@ class XAIClient:
                     "max_num_results": max_results,
                 }
             ],
+            "reasoning": {"effort": "high"},  # High reasoning effort
         }
 
         last_exception = None
