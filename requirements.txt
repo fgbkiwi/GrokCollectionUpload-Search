@@ -2,13 +2,13 @@
 # Baseline validado em Python 3.12
 
 # Framework de UI
-PyQt6==6.11.0
+PyQt6
 
 # HTTP requests para xAI API
-requests==2.33.1
+requests
 
 # Clipboard para copiar chat
-pyperclip==1.11.0
+pyperclip
 
 # Install with: uv pip install -r requirements.txt
 # (pip is not included in .venv — use uv)
