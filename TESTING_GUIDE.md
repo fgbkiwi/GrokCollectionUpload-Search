@@ -116,7 +116,7 @@ Ruins (genéricas): `CLT`, `direito`, `legislação`
 **Objetivo**: Validar busca semântica no Search App.
 
 ```bash
-python PrecedentSearchApp.py
+python PrecedentSifter.py
 ```
 
 **Passos**:

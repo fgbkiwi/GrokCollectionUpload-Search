@@ -192,8 +192,8 @@ python PrecedenteSearchApp.py
 - **Racional**: Baseado na análise do corpus (90.9% dos documentos cabem em 1 chunk), previne problemas de API e melhora performance de busca.
 - **Impacto**: Buscas retornam trechos relevantes dos chunks, não o documento inteiro. Para análise completa, considere reconstruir o documento ou ajustar a estratégia de chunking.
 
-### Limitações de Anexos na Busca (PrecedentSearchApp)
-- **Truncamento de Arquivos**: Quando anexar arquivos MD na interface de busca (`PrecedentSearchApp.py`), apenas os primeiros **5000 caracteres** (~1250 tokens) de cada arquivo são incluídos no contexto da conversa.
+### Limitações de Anexos na Busca (PrecedentSifter)
+- **Truncamento de Arquivos**: Quando anexar arquivos MD na interface de busca (`PrecedentSifter.py`), apenas os primeiros **5000 caracteres** (~1250 tokens) de cada arquivo são incluídos no contexto da conversa.
 - **Racional**: Previne sobrecarga de prompts grandes e mantém performance da UI, mesmo com arquivos de 500k-600k tokens.
 - **Impacto**: O modelo Grok (com janela de contexto de 2M tokens) não consegue analisar o documento completo quando anexado desta forma.
 
@@ -201,7 +201,7 @@ python PrecedenteSearchApp.py
 - **Contexto Teórico**: Modelos como Grok 4.1 Fast suportam até 2M tokens, suficiente para documentos grandes.
 - **Limitações Práticas**: APIs podem ter timeouts, limites de rate, ou problemas de memória com prompts muito grandes. O sistema prioriza eficiência sobre análise completa em tempo real.
 - **Soluções Sugeridas**:
-  - **Aumentar Limite de Anexos**: Modificar `PrecedentSearchApp.py` para ler mais caracteres (ex.: `[:50000]` ou remover truncamento).
+  - **Aumentar Limite de Anexos**: Modificar `PrecedentSifter.py` para ler mais caracteres (ex.: `[:50000]` ou remover truncamento).
   - **Chunking para Anexos**: Implementar divisão em chunks similares ao uploader para arquivos anexados.
   - **Upload Direto**: Para análise completa, faça upload do documento para Collections e use busca semântica em vez de anexos.
 
