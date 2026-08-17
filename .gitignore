@@ -35,28 +35,47 @@ wheels/
 build/
 *.lock
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# OS Specific
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# Credentials and Config
+# Virtual Environments
+.venv/
+
+# Linux specific/conflictual files
+*.sh
+*.bin
+.config/
+.local/
+.cache/
+
+# Flutter Linux build artifacts
+collection_uploader_app/linux/
+
+# Credentials and Local Config
 config.json
+app_config.json
+settings.json
+.vscode/settings.json
 *.key
 *.pem
 .env
 
-# Test data (exceto samples)
+# Local testing scripts (not core repo)
+test_xaiclient.py
+diagnose_connection.py
+
+# Data/Temporary
 sentencas_md_test/
 uploaded_files/
 md_output/
+MDs_output/
 *.json.txt
-
-# Temporary files
 *.tmp
 *.bak
 temp/
 tmp/
+sentencas_md_test_sample/
+
+.venv_win/

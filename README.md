@@ -1,346 +1,357 @@
-# Sistema de Busca Semântica de Precedentes Trabalhistas
+# 🔍 Grok Collection Upload & Search System
 
-Sistema completo para indexação e busca semântica em sentenças trabalhistas usando xAI Collections.
+**Sistema completo de indexação e busca semântica de precedentes trabalhistas usando xAI Collections e Grok LLM**
 
-## 📋 Visão Geral
+[![Python](https://img.shields.io/badge/Python-3.7+-3776AB?logo=python)](https://www.python.org)
+[![xAI](https://img.shields.io/badge/xAI-Collections-000000)](https://x.ai)
 
-Este sistema foi desenvolvido para auxiliar juízes do trabalho na busca de precedentes em sentenças anteriores, utilizando busca semântica híbrida (embeddings + keywords) através da plataforma xAI Collections.
+---
 
-### Funcionalidades Principais
+## 📋 Sobre o Projeto
 
-- **Processamento Inteligente de JSON**: Converte arquivo JSON de sentenças em arquivos Markdown estruturados
-- **Chunking Otimizado**: Divide documentos longos preservando contexto com overlap
-- **Metadados Jurídicos**: Extração automática de palavras-chave jurídicas relevantes
-- **Interface Gráfica**: UI Flet para busca interativa com modelo Grok
-- **Busca Híbrida**: Combina busca semântica e por palavras-chave
-- **Filtros Avançados**: Filtragem por empresa reclamada, tipo de ação, data
+Sistema desenvolvido para o Tribunal Regional do Trabalho da 10ª Região (TRT-10) que permite:
+- 📤 **Upload inteligente** de sentenças trabalhistas para xAI Collections
+- 🔍 **Busca semântica** de precedentes usando Grok LLM
+- 🤖 **Keywords contextuais** geradas automaticamente via IA
+- 📊 **Metadados estruturados** para filtragem avançada
 
-## 🔧 Componentes do Sistema
+---
 
-### 1. CollectionUploader.py
+## ✨ Componentes do Sistema
 
-Script para processar arquivo JSON de sentenças e preparar para upload em xAI Collections.
+### 1. **MD Generation UI (V3)** (Flet)
+Interface gráfica para gerar arquivos MD e metadados JSON.
 
 **Características:**
-- Extração automática de palavras-chave jurídicas (CLT, súmulas, conceitos trabalhistas)
-- Chunking inteligente com overlap para documentos longos
-- Metadados estruturados (categoria, reclamada, número do processo, data, tipo de ação)
-- Nomes de arquivo sanitizados e únicos
-- Estatísticas detalhadas do processamento
+- Geração de keywords via Grok LLM (contextual, não regex)
+- Chunking inteligente (2048 chars, overlap 256)
+- Opção de não dividir JSON em chunks
+- Saída separada: MD (conteúdo) + JSON (metadados)
+- Configurações persistentes
+- Feedback visual em tempo real
 
-**Uso:**
-```bash
-python CollectionUploader.py "Sentenças Indexadas Revisado.json" --output-dir ./sentencas_md
-```
+### 2. **Collection Uploader UI (V3)** (Flet)
+Interface gráfica para upload de MDs com metadados JSON.
 
-**Parâmetros Recomendados para xAI Collection:**
-- **Chunk Size**: 2048 caracteres (~512 tokens)
-- **Chunk Overlap**: 256 caracteres (~64 tokens)
-- **Embedding Model**: Padrão xAI
+**Características:**
+- Upload direto para xAI Collections API (multipart)
+- Validação de pares MD + metadados
+- Verificação de schema de metadados da Collection
+- Criação opcional de Collection com campos pré-definidos
+- Feedback visual em tempo real
 
-### 2. PrecedenteSearchApp.py
+### 3. **Collection Uploader CLI** (Python)
+Versão linha de comando para processamento em lote.
 
-Aplicação gráfica Flet para busca de precedentes usando xAI Collections e modelo Grok.
+**Características:**
+- Mesmo motor de processamento da UI
+- Ideal para automação e scripts
+- Estatísticas detalhadas
+- Configuração via JSON
 
-**Funcionalidades:**
-- Interface de chat intuitiva
-- Seleção de Collections disponíveis
-- Toggle para habilitar/desabilitar busca na Collection
-- Anexar arquivos ao contexto do chat
-- Copiar histórico completo do chat
-- Configurações persistentes (API keys, modelo, temperature)
-- Suporte a busca em tempo real (Web e X)
+### 4. **Precedente Search App** (Flet)
+Aplicação de busca interativa de precedentes.
+
+**Características:**
+- Interface de chat com Grok
+- Busca híbrida (semântica + keywords)
+- Seleção dinâmica de Collections
+- Anexar arquivos ao contexto
+- Busca em tempo real (Web/X)
 - Temas claro/escuro
 
-**Uso:**
+---
+
+## 🚀 Início Rápido
+
+### Pré-requisitos
+- Python 3.7+
+- Conta xAI ([console.x.ai](https://console.x.ai))
+- API Key (Grok) e Management Key (Collections)
+
+### Instalação
+
+```bash
+# Clone o repositório
+git clone https://github.com/yourusername/GrokCollectionUpload-Search
+cd GrokCollectionUpload-Search
+
+# Instale dependências
+pip install -r requirements_uploader_ui.txt  # Para UI
+pip install -r requirements_uploader.txt     # Para CLI
+pip install -r requirements_app.txt          # Para busca
+```
+
+### Uso Rápido
+
+#### **Opção 1: Interface Gráfica (V3)**
+
+```bash
+python MD_GenerationV3.py
+```
+
+1. Configure credenciais em ⚙️ **Configurações**
+2. Selecione arquivos JSON
+3. (Opcional) Marque **"do not chunk JSON objects"**
+4. Clique em **"Gerar Arquivos MD"**
+
+Depois, faça o upload:
+
+```bash
+python CollectionUploaderV3.py
+```
+
+1. Configure **Management Key** e selecione ou crie a Collection
+2. Selecione os arquivos MD ou a pasta de saída
+3. Clique em **"Upload para Collection"**
+4. **Recomendação**: se ocorrerem erros intermitentes de rede (HTTP 500 com mensagens de proxy), utilize uma VPN durante o upload
+
+#### **Opção 2: Linha de Comando (Uploader)**
+
+```bash
+# Configure config.json (use config_example.json como template)
+cp config_example.json config.json
+
+# Execute
+python CollectionUploaderV2.py --config config.json --input sentencas.json
+```
+
+#### **Opção 3: Busca de Precedentes**
+
 ```bash
 python PrecedenteSearchApp.py
 ```
 
-**Primeira Execução:**
-1. Clique em ⚙️ **Configurações**
-2. Configure:
-   - **Management Key**: Chave de gerenciamento da xAI Collection
-   - **API Key**: Chave de API do Grok
-   - **Modelo**: Selecione o modelo (recomendado: grok-2-1212)
-   - **Temperature**: 0.7 (padrão)
-   - **System Prompt**: Customize conforme necessário
-3. Salve as configurações
+1. Configure em ⚙️ **Configurações**
+2. Selecione Collection
+3. Pergunte ao Grok sobre precedentes
 
-## 📊 Estrutura do Arquivo JSON de Entrada
+---
 
+## 📊 Formato dos Dados
+
+### Entrada (JSON)
+```json
+[
+  {
+    "categoria": "HORAS EXTRAORDINÁRIAS",
+    "reclamada": "Empresa XYZ LTDA",
+    "conteudo": "Texto da fundamentação jurídica...",
+    "numero_processo": "0000123-45.2023.5.10.0009",
+    "data_publicacao": "2023-06-15",
+    "tipo_acao": "Reclamação Trabalhista"
+  }
+]
+```
+
+### Saída (Markdown)
+```markdown
+[Fundamentação jurídica...]
+```
+
+### Saída (Metadata JSON)
 ```json
 {
   "categoria": "HORAS EXTRAORDINÁRIAS",
-  "reclamada": "Nome da Empresa LTDA",
-  "conteudo": "Texto completo da fundamentação...",
+  "reclamada": "Empresa XYZ LTDA",
   "numero_processo": "0000123-45.2023.5.10.0009",
   "data_publicacao": "2023-06-15",
-  "tipo_acao": "Reclamação Trabalhista"
+  "tipo_acao": "Reclamação Trabalhista",
+  "palavras-chave": ["art. 59 CLT", "horas extras", "banco de horas"]
 }
 ```
 
-### Campos:
-
-- **categoria**: Tópico da fundamentação (ex: JUSTA CAUSA, HORAS EXTRAS)
-- **reclamada**: Nome da empresa reclamada (ou vazio)
-- **conteudo**: Texto da fundamentação jurídica
-- **numero_processo**: Número único do processo
-- **data_publicacao**: Data de publicação da sentença
-- **tipo_acao**: Tipo de ação (Reclamação Trabalhista, Mandado de Segurança, etc.)
-
-## 🗂️ Estrutura dos Arquivos MD Gerados
-
-```markdown
 ---
-categoria: ADICIONAL DE INSALUBRIDADE
-reclamada: Empresa XYZ LTDA
-numero_processo: 0000006-73.2023.5.10.0009
-data_publicacao: 2023-11-17
-tipo_acao: Reclamação Trabalhista
-keywords: insalubridade, adicional_noturno, clt, artigo_clt, fgts
----
-# ADICIONAL DE INSALUBRIDADE
 
-[Conteúdo da fundamentação...]
+## 🎯 Funcionalidades
+
+### **Upload Inteligente**
+- ✅ Keywords geradas por Grok (não regex)
+- ✅ Chunking otimizado para embeddings
+- ✅ Metadados separados do conteúdo
+- ✅ Upload direto via API
+
+### **Busca Semântica**
+- ✅ Compreende significado, não só palavras
+- ✅ Busca híbrida (embeddings + keywords)
+- ✅ Filtros por metadados (empresa, data, tipo)
+- ✅ Citação automática de processos
+
+### **Interface Amigável**
+- ✅ UI Flet moderna e responsiva
+- ✅ Feedback visual em tempo real
+- ✅ Configurações persistentes
+- ✅ Logs detalhados com timestamps
+
+---
+
+## ⚠️ Limitações da API e Considerações Técnicas
+
+### Document Chunking e Upload
+- **Chunking Automático**: Durante o upload via `CollectionUploaderV2.py`, documentos são automaticamente divididos em chunks de 2048 caracteres com overlap de 256 caracteres. Isso otimiza a busca semântica, mas significa que o documento completo **não é armazenado como uma unidade única** na Collection.
+- **Racional**: Baseado na análise do corpus (90.9% dos documentos cabem em 1 chunk), previne problemas de API e melhora performance de busca.
+- **Impacto**: Buscas retornam trechos relevantes dos chunks, não o documento inteiro. Para análise completa, considere reconstruir o documento ou ajustar a estratégia de chunking.
+
+### Limitações de Anexos na Busca (PrecedentSifter)
+- **Truncamento de Arquivos**: Quando anexar arquivos MD na interface de busca (`PrecedentSifter.py`), apenas os primeiros **5000 caracteres** (~1250 tokens) de cada arquivo são incluídos no contexto da conversa.
+- **Racional**: Previne sobrecarga de prompts grandes e mantém performance da UI, mesmo com arquivos de 500k-600k tokens.
+- **Impacto**: O modelo Grok (com janela de contexto de 2M tokens) não consegue analisar o documento completo quando anexado desta forma.
+
+### Janela de Contexto vs. Limitações Práticas
+- **Contexto Teórico**: Modelos como Grok 4.1 Fast suportam até 2M tokens, suficiente para documentos grandes.
+- **Limitações Práticas**: APIs podem ter timeouts, limites de rate, ou problemas de memória com prompts muito grandes. O sistema prioriza eficiência sobre análise completa em tempo real.
+- **Soluções Sugeridas**:
+  - **Aumentar Limite de Anexos**: Modificar `PrecedentSifter.py` para ler mais caracteres (ex.: `[:50000]` ou remover truncamento).
+  - **Chunking para Anexos**: Implementar divisão em chunks similares ao uploader para arquivos anexados.
+  - **Upload Direto**: Para análise completa, faça upload do documento para Collections e use busca semântica em vez de anexos.
+
+### Recomendações
+- Para documentos muito grandes (>100k tokens), considere pré-processamento ou divisão em seções menores.
+- Monitore logs de erro da API xAI para identificar limitações específicas.
+- Teste com dados de exemplo em `sentencas_md_test_sample/` antes de produção.
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+GrokCollectionUpload-Search/
+├── CollectionUploaderV2.py       # CLI uploader
+├── CollectionUploaderV2UI.py     # GUI uploader (Flet)
+├── MD_GenerationV3.py            # GUI gerador MD + metadados
+├── CollectionUploaderV3.py       # GUI upload MD + metadados
+├── PrecedenteSearchApp.py        # Busca de precedentes (Flet)
+├── config_example.json           # Template de configuração
+├── requirements_*.txt            # Dependências
+├── check_collection_schema.py    # Diagnóstico de Collection
+├── check_processing_status.py    # Monitor de processamento
+├── Uploaders/
+│   └── archive/                  # Scripts legados arquivados
+├── docs/
+│   └── archive/                  # Documentação antiga
+└── MDs_output/                   # Exemplos de saída
 ```
 
-### Metadados:
+---
 
-- **categoria**: Categoria jurídica da fundamentação
-- **reclamada**: Empresa para filtros prioritários
-- **numero_processo**: Identificador único
-- **data_publicacao**: Para priorizar precedentes recentes
-- **tipo_acao**: Tipo de processo
-- **keywords**: Palavras-chave jurídicas extraídas automaticamente
+## 🔧 Configuração
 
-## 🔍 Palavras-chave Jurídicas Reconhecidas
+### Arquivo `config.json`
 
-O sistema identifica automaticamente:
-
-### Legislação e Normas
-- Artigos da CLT (`art. 317`, `CLT`)
-- Leis (`Lei 9.394/1996`)
-- Súmulas (`Súmula 374/TST`)
-- Jurisprudência (TST, STF)
-
-### Conceitos Trabalhistas
-- Horas extras, adicional noturno
-- Insalubridade, periculosidade
-- FGTS, férias, 13º salário
-- Rescisão, justa causa, reintegração
-- Equiparação salarial, prescrição
-- Honorários advocatícios, justiça gratuita
-- Danos moral e material
-- Intervalos, repousos semanais
-- Categorias profissionais, direito sindical
-- Normas coletivas
-
-## 📈 Estatísticas do Chunking
-
-Com base na análise do corpus de sentenças:
-
-- **Média de caracteres**: 1.973 (~500 tokens)
-- **Desvio padrão**: 3.298 caracteres
-- **90.90%** dos documentos dentro de 1 DP
-- **Range**: 19 a 54.685 caracteres
-
-### Estratégia de Chunking
-
-**Chunk Size: 2048 caracteres**
-- Captura bem a maioria dos conteúdos médios
-- Mantém contexto suficiente para embeddings
-- Evita fragmentação excessiva
-
-**Chunk Overlap: 256 caracteres (12.5%)**
-- Preserva continuidade entre chunks
-- Evita perda de contexto em quebras
-- Ideal para textos jurídicos densos
-
-## 🚀 Workflow Completo
-
-### Passo 1: Processar Sentenças
-
-```bash
-python CollectionUploader.py "Sentenças Indexadas Revisado.json" --output-dir ./sentencas_md
+```json
+{
+  "grok_api_key": "xai-...",
+  "management_key": "xai-mgmt-...",
+  "collection_id": "col_...",
+  "grok_model": "grok-beta",
+  "output_dir": "./sentencas_md",
+  "save_local_md": true
+}
 ```
 
-**Resultado:**
-- Arquivos MD criados em `./sentencas_md/`
-- Estatísticas detalhadas exibidas no console
-- Metadados estruturados em cada arquivo
+### Criar Collection no xAI Console
 
-### Passo 2: Criar Collection no xAI Console
-
-1. Acesse: https://console.x.ai/
-2. Crie nova Collection:
-   - **Name**: Precedentes Trabalhistas
+1. Acesse [console.x.ai](https://console.x.ai)
+2. Crie nova Collection
+3. Configure:
    - **Chunk Size**: 2048 caracteres
    - **Chunk Overlap**: 256 caracteres
    - **Embedding Model**: Padrão xAI
+4. Copie Management Key e Collection ID
 
-3. Configure campos de metadados:
-   - `categoria` (filtro)
-   - `reclamada` (filtro - priorização)
-   - `numero_processo` (filtro)
-   - `data_publicacao` (filtro - recentes primeiro)
-   - `tipo_acao` (filtro)
-   - `keywords` (busca híbrida)
+### Criar Collection pela UI (V3)
 
-4. Gere **Management Key** para a Collection
-
-### Passo 3: Upload dos Arquivos MD
-
-1. No xAI Console, acesse sua Collection
-2. Faça upload dos arquivos do diretório `./sentencas_md/`
-3. Aguarde processamento dos embeddings
-
-### Passo 4: Configurar Aplicação de Busca
-
-```bash
-python PrecedenteSearchApp.py
-```
-
-1. Clique em ⚙️ **Configurações**
-2. Configure:
-   - **Management Key**: Chave da Collection criada
-   - **API Key**: Chave de API do Grok
-   - **Modelo**: grok-2-1212
-   - **Temperature**: 0.7
-   - **System Prompt**: 
-   ```
-   Você é um assistente jurídico especializado em Direito do Trabalho brasileiro. 
-   Analise precedentes e fundamente respostas com base na CLT, jurisprudência e 
-   doutrina trabalhista. Ao citar precedentes, sempre mencione o número do processo.
-   ```
-
-### Passo 5: Realizar Buscas
-
-1. Selecione a Collection no menu suspenso
-2. Habilite "Buscar na Collection"
-3. Digite consultas como:
-   - "Como fundamentar adicional de insalubridade para profissionais de saúde?"
-   - "Precedentes sobre justa causa por insubordinação"
-   - "Critérios para equiparação salarial entre professores"
-   - "Prescrição em ações de consignação em pagamento"
-
-## 🎯 Busca Híbrida com Filtros
-
-### Exemplo de Consulta Avançada:
-
-**Pergunta:**
-> "Busque precedentes sobre adicional de insalubridade em hospitais, priorizando processos da empresa Hospital XYZ dos últimos 2 anos"
-
-**Sistema:**
-1. Realiza busca semântica na Collection (embeddings)
-2. Combina com busca por keywords (`insalubridade`, `hospital`)
-3. Aplica filtros:
-   - `reclamada = "Hospital XYZ"` (prioridade)
-   - `data_publicacao >= 2022-01-01`
-   - `categoria LIKE "%INSALUBRIDADE%"`
-4. Retorna top-5 precedentes mais relevantes
-5. Grok analisa e fundamenta resposta com base nos precedentes
-
-## 📝 Boas Práticas de Uso
-
-### Para Juízes:
-
-1. **Seja específico nas consultas**: Inclua conceitos jurídicos específicos
-2. **Use termos técnicos**: O sistema reconhece terminologia trabalhista
-3. **Priorize por empresa**: Mencione a empresa reclamada quando relevante
-4. **Contexto temporal**: Especifique período se quiser precedentes recentes
-5. **Anexe arquivos**: Adicione petições ou documentos ao contexto quando necessário
-
-### Para Manutenção do Sistema:
-
-1. **Atualize regularmente**: Processe novas sentenças periodicamente
-2. **Monitore qualidade**: Verifique se keywords estão sendo extraídas corretamente
-3. **Ajuste chunks**: Se necessário, experimente com chunk size/overlap
-4. **Backup**: Mantenha backup dos arquivos MD e configurações
-
-## 🔐 Segurança e Privacidade
-
-- **API Keys**: Armazenadas localmente em `app_config.json`
-- **Dados sensíveis**: Remova informações pessoais antes do processamento
-- **Controle de acesso**: Use Management Key separada por usuário
-- **Conformidade**: Garanta conformidade com LGPD ao indexar sentenças
-
-## 📦 Dependências
-
-### CollectionUploader.py:
-```bash
-pip install -r requirements_uploader.txt
-```
-
-**Pacotes:**
-- `json` (built-in)
-- `pathlib` (built-in)
-- `argparse` (built-in)
-
-### PrecedenteSearchApp.py:
-```bash
-pip install -r requirements_app.txt
-```
-
-**Pacotes:**
-- `flet>=0.20.0`
-- `requests>=2.31.0`
-- `pyperclip>=1.8.2`
-
-## 🆘 Solução de Problemas
-
-### Erro: "Chunk size muito grande"
-**Solução**: Reduza chunk_size para 1024 caracteres
-
-### Erro: "Management Key inválida"
-**Solução**: Verifique se a chave foi copiada corretamente do xAI Console
-
-### Erro: "Collection não encontrada"
-**Solução**: Certifique-se de que a Collection foi criada e o upload dos arquivos foi concluído
-
-### Busca não retorna resultados relevantes
-**Solução**: 
-1. Verifique se os metadados foram configurados corretamente na Collection
-2. Tente reformular a consulta com termos mais específicos
-3. Aumente o `top_k` na configuração de busca (padrão: 5)
-
-## 📚 Recursos Adicionais
-
-- **Documentação xAI Collections**: https://docs.x.ai/docs/guides/using-collections/
-- **API Reference**: https://docs.x.ai/docs/guides/tools/collections-search-tool
-- **xAI Console**: https://console.x.ai/
-
-## 📊 Resultados do Teste (Excerto)
-
-```
-Total de sentenças processadas:     25
-Total de arquivos MD criados:       64
-Categorias únicas:                  18
-Tipos de ação únicos:               3
-Tamanho médio por arquivo:          ~2048 caracteres
-```
-
-### Categorias Encontradas:
-- ADICIONAL DE INSALUBRIDADE
-- ATIVIDADE DE PROFESSOR — CARACTERIZAÇÃO
-- DIFERENÇAS SALARIAIS
-- EQUIPARAÇÃO SALARIAL
-- HONORÁRIOS ADVOCATÍCIOS
-- HORAS EXTRAORDINÁRIAS
-- JUSTA CAUSA. VERBAS RESCISÓRIAS
-- JUSTIÇA GRATUITA
-- PRESCRIÇÃO
-- REINTEGRAÇÃO
-- E mais...
-
-## 🎓 Sobre o Sistema
-
-Este sistema foi desenvolvido para modernizar a busca de precedentes judiciais, substituindo busca por palavras-chave tradicionais por busca semântica baseada em embeddings de linguagem natural. A combinação de embeddings (captura significado) com keywords (precisão terminológica) oferece resultados superiores para pesquisa jurídica.
-
-## 📄 Licença
-
-Este sistema foi desenvolvido especificamente para uso no Tribunal Regional do Trabalho.
+Na tela de **Configurações** do CollectionUploaderV3, marque **"Criar nova collection"**,
+informe o nome e clique em **"Criar Collection"**. A Collection será criada com os
+campos de metadados necessários.
 
 ---
 
-**Desenvolvido para auxiliar a magistratura trabalhista brasileira na fundamentação de decisões com base em precedentes próprios.**
+## 📚 Documentação
+
+Style guideline: usamos inicialização por atribuição de propriedades em widgets Flet para evitar incompatibilidades com type stubs do Pylance.
+
+- **[USAGE_GUIDE.md](USAGE_GUIDE.md)** - Guia completo de uso
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testes e diagnósticos
+- **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - Instruções para AI agents
+
+---
+
+## 🧩 Sugestoes de Arquitetura (Opcional)
+
+- **Plugin-based**: separar geracao e upload como modulos carregaveis
+- **Config presets**: usar perfis de configuracao para diferentes fluxos
+- **Fila de processamento**: enfileirar lotes grandes para evitar bloqueios
+- **Camada de validacao**: verificar consistencia entre MD e metadados antes do upload
+
+---
+
+## 🛠️ Ferramentas de Diagnóstico
+
+### Verificar Schema da Collection
+```bash
+python check_collection_schema.py <management_key> <collection_id>
+```
+
+### Monitorar Status de Processamento
+```bash
+python check_processing_status.py <management_key> <collection_id>
+```
+
+---
+
+## ❓ Perguntas Frequentes
+
+**Q: Como obtenho API Keys?**  
+A: Acesse [console.x.ai](https://console.x.ai) → Settings → API Keys
+
+**Q: Quanto tempo leva o processamento?**  
+A: Para 100 documentos: ~30-60 minutos (embedding é lento)
+
+**Q: Posso usar sem interface gráfica?**  
+A: Sim, use `CollectionUploaderV2.py` (CLI)
+
+**Q: Como adiciono novas sentenças?**  
+A: Processe novo JSON e faça upload incremental
+
+Mais perguntas? Consulte [USAGE_GUIDE.md](USAGE_GUIDE.md)
+
+---
+
+## 🔐 Segurança
+
+- ⚠️ **Nunca** compartilhe suas API Keys
+- ✅ Keys são armazenadas localmente em `app_config.json` e `config.json`
+- ✅ Remova informações sensíveis antes do upload
+- ✅ Conforme LGPD para dados pessoais
+
+---
+
+## 🚦 Status do Projeto
+
+| Componente | Status | Versão |
+|------------|--------|--------|
+| Collection Uploader UI | ✅ Ativo | 2.1 |
+| Collection Uploader CLI | ✅ Ativo | 2.0 |
+| Precedente Search App | ✅ Ativo | 1.0 |
+| SmartUploader | 📦 Arquivado | - |
+| RobustUploader | 📦 Arquivado | - |
+
+---
+
+## 📝 Licença
+
+Desenvolvido especificamente para uso no Tribunal Regional do Trabalho da 10ª Região.
+
+---
+
+## 🤝 Suporte
+
+Para questões sobre:
+- **Uso do sistema**: Consulte [USAGE_GUIDE.md](USAGE_GUIDE.md)
+- **Problemas técnicos**: Consulte [TESTING_GUIDE.md](TESTING_GUIDE.md)
+- **xAI API**: Contate support@x.ai
+
+---
+
+**Desenvolvido para modernizar a busca de precedentes judiciais com IA** 🚀
