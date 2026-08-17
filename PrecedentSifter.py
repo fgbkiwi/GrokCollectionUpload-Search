@@ -168,24 +168,49 @@ class XAIClient:
         
         return results
 
-    def _log_request_error(self, method: str, url: str, response: Optional[requests.Response], error: Exception):
+    def _log_request_error(self, method: str, url: str, response: Optional[requests.Response], error: Exception, elapsed: Optional[float] = None):
         """Loga detalhes de um erro de requisição."""
         error_msg = f"Erro na requisição {method} {url}: {str(error)}"
+        if elapsed is not None:
+            error_msg += f"\nTempo decorrido: {elapsed:.2f}s"
         if response is not None:
             error_msg += f"\nStatus Code: {response.status_code}"
+            error_msg += f"\nRequest-ID: {response.headers.get('x-request-id', 'N/A')}"
             error_msg += f"\nHeaders: {dict(response.headers)}"
-            
+
             # Tratamento específico para erros comuns
             if response.status_code == 401:
                 error_msg += "\n[DICA]: Erro 401 indica chave inválida, expirada ou falta de permissão."
             elif response.status_code == 403:
                 error_msg += "\n[DICA]: Erro 403 indica acesso proibido. Verifique se sua conta tem acesso a este endpoint ou região."
-            
+
             try:
                 error_msg += f"\nCorpo: {response.text[:500]}"
             except:
                 pass
         logger.error(error_msg)
+
+    def _log_call_start(self, method: str, url: str, attempt: int, max_retries: int, timeout: float, **details):
+        """Loga o início de uma chamada de API com os detalhes do payload (sem dados sensíveis)."""
+        detail_str = " | ".join(f"{k}={v}" for k, v in details.items())
+        logger.info(f"[API >>] {method} {url} | tentativa {attempt + 1}/{max_retries + 1} | timeout={timeout}s | {detail_str}")
+
+    def _log_call_success(self, method: str, url: str, attempt: int, elapsed: float, response: requests.Response):
+        """Loga o sucesso de uma chamada de API com tempo de resposta e metadados úteis para diagnóstico."""
+        req_id = response.headers.get('x-request-id', 'N/A')
+        size = len(response.content) if response.content is not None else 0
+        logger.info(
+            f"[API OK] {method} {url} | tentativa {attempt + 1} | {elapsed:.2f}s | "
+            f"status={response.status_code} | request_id={req_id} | resp_bytes={size}"
+        )
+
+    def _log_call_timeout(self, method: str, url: str, attempt: int, elapsed: float, timeout: float):
+        """Loga um timeout de leitura, deixando explícito quanto tempo realmente se passou."""
+        logger.warning(
+            f"[API TIMEOUT] {method} {url} | tentativa {attempt + 1} | decorridos {elapsed:.2f}s "
+            f"(limite configurado {timeout}s) — conexão TCP estabelecida mas o servidor não enviou "
+            f"a resposta a tempo. Não é um problema de rede local; é o processamento do lado do servidor."
+        )
 
     def _check_all_connectivity(self):
         """Verifica múltiplos pontos de conectividade."""
@@ -217,10 +242,13 @@ class XAIClient:
         url = f"{self.mgmt_url}/collections"
         
         try:
-            logger.info(f"Tentando listar collections via: {url}")
+            logger.info(f"[API >>] GET {url} | timeout=15s")
+            t0 = time.monotonic()
             response = requests.get(url, headers=headers, timeout=15)
+            elapsed = time.monotonic() - t0
 
             if response.status_code == 200:
+                self._log_call_success("GET", url, 0, elapsed, response)
                 data = response.json()
                 collections = []
                 if isinstance(data, list):
@@ -230,7 +258,7 @@ class XAIClient:
                         collections = data["data"]
                     elif isinstance(data.get("collections"), list):
                         collections = data["collections"]
-                
+
                 if collections:
                     logger.info(f"Sucesso ao listar {len(collections)} collections")
                     return collections
@@ -244,9 +272,9 @@ class XAIClient:
                 self.last_collections_error = "Acesso negado à Management API (403)."
             else:
                 self.last_collections_error = f"Erro ao carregar collections (Status {response.status_code})."
-            
-            self._log_request_error("GET", url, response, Exception(self.last_collections_error))
-        
+
+            self._log_request_error("GET", url, response, Exception(self.last_collections_error), elapsed=elapsed)
+
         except requests.exceptions.ConnectionError as ex:
             self.last_collections_error = "Erro de conexão com o servidor da xAI."
             logger.error(f"{self.last_collections_error}: {str(ex)}")
@@ -263,23 +291,28 @@ class XAIClient:
             self.last_models_error = "API Key não configurada."
             return []
 
+        url = f"{self.base_url}/models"
         try:
+            logger.info(f"[API >>] GET {url} | timeout=10s")
+            t0 = time.monotonic()
             response = requests.get(
-                f"{self.base_url}/models",
+                url,
                 headers=self.headers,
                 timeout=10
             )
+            elapsed = time.monotonic() - t0
             if response.status_code != 200:
-                self._log_request_error("GET", f"{self.base_url}/models", response, Exception("Status != 200"))
+                self._log_request_error("GET", url, response, Exception("Status != 200"), elapsed=elapsed)
                 self.last_models_error = f"{response.status_code}: {response.text[:200]}"
                 return []
 
+            self._log_call_success("GET", url, 0, elapsed, response)
             data = response.json()
             models = data.get("data", []) if isinstance(data, dict) else []
             model_ids = [str(m["id"]) for m in models if isinstance(m, dict) and m.get("id") is not None]
             return model_ids
         except Exception as e:
-            self._log_request_error("GET", f"{self.base_url}/models", None, e)
+            self._log_request_error("GET", url, None, e)
             self.last_models_error = str(e)
             self._check_all_connectivity()
             return []
@@ -297,6 +330,8 @@ class XAIClient:
             "reasoning": {"effort": "high"},  # High reasoning effort
         }
 
+        url = f"{self.base_url}/documents/search"
+        timeout = 45
         last_error = None
         for attempt in range(max_retries + 1):
             try:
@@ -305,14 +340,26 @@ class XAIClient:
                     logger.info(f"Retentativa de busca {attempt}/{max_retries} em {wait_time:.2f}s...")
                     time.sleep(wait_time)
 
-                response = requests.post(
-                    f"{self.base_url}/documents/search",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=45,
+                self._log_call_start(
+                    "POST", url, attempt, max_retries, timeout,
+                    query_chars=len(query), collection_id=collection_id,
+                    reasoning_effort=payload["reasoning"]["effort"],
                 )
-                
+                t0 = time.monotonic()
+                try:
+                    response = requests.post(
+                        url,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=timeout,
+                    )
+                except requests.exceptions.ReadTimeout:
+                    self._log_call_timeout("POST", url, attempt, time.monotonic() - t0, timeout)
+                    raise
+                elapsed = time.monotonic() - t0
+
                 if response.status_code == 200:
+                    self._log_call_success("POST", url, attempt, elapsed, response)
                     data = response.json()
                     logger.info("Busca de documentos realizada com sucesso")
                     # ... normalização ...
@@ -337,14 +384,14 @@ class XAIClient:
                             return normalized
                     return results if results else []
                 
-                self._log_request_error("POST", f"{self.base_url}/documents/search", response, Exception(f"Status {response.status_code}"))
+                self._log_request_error("POST", url, response, Exception(f"Status {response.status_code}"), elapsed=elapsed)
                 last_error = f"Erro {response.status_code}: {response.text[:200]}"
-                
+
                 if response.status_code not in [429, 500, 502, 503, 504]:
                     break
-                    
+
             except requests.exceptions.RequestException as e:
-                self._log_request_error("POST", f"{self.base_url}/documents/search", None, e)
+                self._log_request_error("POST", url, None, e)
                 last_error = f"Erro de conexão na tentativa {attempt + 1}: {str(e)}"
                 if attempt == max_retries:
                     self._check_all_connectivity()
@@ -371,7 +418,11 @@ class XAIClient:
         
         if tools: payload["tools"] = tools
         if stream: payload["stream"] = True
-        
+
+        url = f"{self.base_url}/chat/completions"
+        timeout = 180  # reasoning.effort=high pode levar bem mais que 120s em respostas longas
+        total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
         last_exception = None
         for attempt in range(max_retries + 1):
             try:
@@ -380,24 +431,39 @@ class XAIClient:
                     logger.info(f"Retentativa de chat {attempt}/{max_retries} em {wait_time:.2f}s...")
                     time.sleep(wait_time)
 
-                response = requests.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=120,
-                    stream=stream
+                self._log_call_start(
+                    "POST", url, attempt, max_retries, timeout,
+                    model=model, temperature=temperature, reasoning_effort="high",
+                    n_messages=len(messages), total_chars=total_chars,
+                    n_tools=len(tools) if tools else 0, stream=stream,
                 )
-                
+                t0 = time.monotonic()
+                try:
+                    response = requests.post(
+                        url,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=timeout,
+                        stream=stream
+                    )
+                except requests.exceptions.ReadTimeout:
+                    self._log_call_timeout("POST", url, attempt, time.monotonic() - t0, timeout)
+                    raise
+                elapsed = time.monotonic() - t0
+
                 if response.status_code != 200:
-                    self._log_request_error("POST", f"{self.base_url}/chat/completions", response, Exception(f"Status {response.status_code}"))
+                    self._log_request_error("POST", url, response, Exception(f"Status {response.status_code}"), elapsed=elapsed)
                     response.raise_for_status()
-                
-                logger.info(f"Chat completion sucesso (tentativa {attempt + 1})")
+
+                self._log_call_success("POST", url, attempt, elapsed, response)
                 return response if stream else response.json()
 
             except requests.exceptions.ReadTimeout as e:
-                logger.warning(f"Timeout na tentativa {attempt + 1}")
-                last_exception = Exception(f"Timeout de leitura (120s) na tentativa {attempt + 1}. O servidor x.ai está lento.")
+                last_exception = Exception(
+                    f"Timeout de leitura ({timeout}s) na tentativa {attempt + 1}. "
+                    f"O servidor x.ai está demorando a processar (reasoning effort alto). "
+                    f"Veja app_debug.log para detalhes de tempo de cada tentativa."
+                )
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"Erro de conexão na tentativa {attempt + 1}: {str(e)}")
                 last_exception = Exception(f"Erro de conexão na tentativa {attempt + 1}. Verifique sua internet e DNS.")
@@ -413,7 +479,7 @@ class XAIClient:
             except Exception as e:
                 logger.error(f"Erro inesperado: {str(e)}")
                 raise Exception(f"Erro inesperado na requisição: {str(e)}")
-        
+
         raise last_exception or Exception("Falha após múltiplas tentativas.")
 
     def responses_with_collection(
@@ -423,13 +489,20 @@ class XAIClient:
         temperature: float,
         collection_id: str,
         max_results: int = 10,
-        max_retries: int = 4,
+        max_retries: int = 2,
     ) -> str:
         """Usa o endpoint /v1/responses com file_search para RAG grounded na collection.
 
         Conforme documentação oficial (https://docs.x.ai/developers/tools/collections-search):
         o tool 'file_search' com 'vector_store_ids' faz o modelo buscar automaticamente
         na collection antes de responder, evitando alucinações.
+
+        Nota sobre timeout: com reasoning.effort=high + file_search, o servidor pode levar
+        bem mais que 120s para responder (observado em produção: timeout consistente em
+        todas as tentativas com o limite de 120s, indicando processamento lento no lado do
+        servidor, não instabilidade de rede). Por isso o timeout de leitura é maior aqui e
+        max_retries é menor por padrão, para não fazer o usuário esperar 10+ minutos por
+        tentativas repetidas que tendem a falhar do mesmo jeito.
 
         Returns:
             Texto da resposta do assistente com citações embutidas.
@@ -448,6 +521,10 @@ class XAIClient:
             "reasoning": {"effort": "high"},  # High reasoning effort
         }
 
+        url = f"{self.base_url}/responses"
+        timeout = 240
+        total_chars = sum(len(str(m.get("content", ""))) for m in input_messages)
+
         last_exception = None
         for attempt in range(max_retries + 1):
             try:
@@ -456,19 +533,31 @@ class XAIClient:
                     logger.info(f"Retentativa de responses {attempt}/{max_retries} em {wait_time:.2f}s...")
                     time.sleep(wait_time)
 
-                response = requests.post(
-                    f"{self.base_url}/responses",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=120,
+                self._log_call_start(
+                    "POST", url, attempt, max_retries, timeout,
+                    model=model, temperature=temperature, reasoning_effort="high",
+                    collection_id=collection_id, max_num_results=max_results,
+                    n_input_messages=len(input_messages), total_chars=total_chars,
                 )
+                t0 = time.monotonic()
+                try:
+                    response = requests.post(
+                        url,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=timeout,
+                    )
+                except requests.exceptions.ReadTimeout:
+                    self._log_call_timeout("POST", url, attempt, time.monotonic() - t0, timeout)
+                    raise
+                elapsed = time.monotonic() - t0
 
                 if response.status_code != 200:
-                    self._log_request_error("POST", f"{self.base_url}/responses", response, Exception(f"Status {response.status_code}"))
+                    self._log_request_error("POST", url, response, Exception(f"Status {response.status_code}"), elapsed=elapsed)
                     response.raise_for_status()
 
+                self._log_call_success("POST", url, attempt, elapsed, response)
                 data = response.json()
-                logger.info(f"Responses API sucesso (tentativa {attempt + 1})")
 
                 # Extrai o texto da resposta do formato Responses API
                 # output é uma lista de items; procura o item de mensagem do assistente
@@ -478,11 +567,16 @@ class XAIClient:
                         for content_block in item.get("content", []):
                             if content_block.get("type") == "output_text":
                                 text_parts.append(content_block.get("text", ""))
+                logger.info(f"[API] Resposta com {len(text_parts)} bloco(s) de texto, {sum(len(t) for t in text_parts)} chars")
                 return "\n".join(text_parts) if text_parts else ""
 
             except requests.exceptions.ReadTimeout as e:
-                logger.warning(f"Timeout na tentativa {attempt + 1}")
-                last_exception = Exception(f"Timeout de leitura (120s) na tentativa {attempt + 1}.")
+                last_exception = Exception(
+                    f"Timeout de leitura ({timeout}s) na tentativa {attempt + 1}. "
+                    f"O modelo com reasoning effort alto + busca na collection está demorando "
+                    f"mais do que o esperado para responder. Veja app_debug.log para o tempo "
+                    f"exato de cada tentativa."
+                )
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"Erro de conexão na tentativa {attempt + 1}: {str(e)}")
                 last_exception = Exception(f"Erro de conexão na tentativa {attempt + 1}.")
