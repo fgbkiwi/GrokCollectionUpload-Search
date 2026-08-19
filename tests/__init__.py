@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-"""Testes para o módulo Cartão do Caso."""
-=======
 """
-__init__.py
-Pacote de testes do indexador.
+Testes para o sistema Sarah.
+Inclui testes do Cartão do Caso e do Indexador de Sentenças.
 """
->>>>>>> origin/cursor/indexador-sentencas-xai-82ad
