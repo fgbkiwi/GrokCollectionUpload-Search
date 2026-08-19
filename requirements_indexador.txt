@@ -1,0 +1,20 @@
+# Requirements para Indexador de Sentenças Trabalhistas
+# Sistema completo de extração e indexação em xAI Collections
+
+# Framework de UI
+flet>=0.24.0
+
+# HTTP requests para xAI API
+requests>=2.31.0
+
+# Testes
+pytest>=7.4.0
+
+# Instalação:
+# pip install -r requirements_indexador.txt
+
+# Para executar testes:
+# pytest tests/
+
+# Para executar o indexador:
+# python IndexadorSentencas.py
