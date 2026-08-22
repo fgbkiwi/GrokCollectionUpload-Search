@@ -3,6 +3,7 @@ Kernel Sarah - Prompt de sistema editável e configuração da assessora.
 """
 
 import json
+import requests
 from pathlib import Path
 from typing import Optional
 
@@ -157,8 +158,6 @@ Se não existir, RECUSAR trecho e avisar.
         Returns:
             Sugestão de novo prompt
         """
-        import requests
-        
         prompt_atual = self.obter_prompt()
         
         prompt_melhoria = f"""Analise o prompt de sistema atual da Sarah (assessora jurídica) 
