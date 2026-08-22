@@ -1,0 +1,15 @@
+# Requirements para Cartão do Caso
+# Extração estruturada de autos trabalhistas
+
+# API HTTP
+requests>=2.31.0
+
+# Validação de schema
+pydantic>=2.0.0
+
+# Interface gráfica
+flet>=0.23.0
+
+# Testes
+pytest>=7.4.0
+pytest-mock>=3.12.0
