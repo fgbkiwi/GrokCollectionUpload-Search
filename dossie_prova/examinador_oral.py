@@ -6,6 +6,7 @@ metodologia do juiz.
 """
 
 import json
+import requests
 from typing import List
 from .schema import ProvaOral
 
@@ -35,8 +36,6 @@ class ExaminadorOral:
         Returns:
             Tupla com (lista de provas orais, lista de avisos)
         """
-        import requests
-        
         if not conteudo_oral or len(conteudo_oral.strip()) < 50:
             return [], ["Nenhum conteúdo oral fornecido ou conteúdo muito curto"]
         
