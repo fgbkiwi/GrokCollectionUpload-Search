@@ -46,6 +46,8 @@ build/
 
 # Credentials and Config
 config.json
+app_config.json
+indexador_config.json
 *.key
 *.pem
 .env
@@ -55,6 +57,11 @@ sentencas_md_test/
 uploaded_files/
 md_output/
 *.json.txt
+
+# Indexador data
+.indexador_sentencas/
+sentencas_md/
+sentencas_md_v2/
 
 # Temporary files
 *.tmp
