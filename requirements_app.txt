@@ -2,7 +2,10 @@
 # Aplicação Flet para busca de precedentes usando xAI Collections
 
 # Framework de UI
-flet>=0.20.0
+# NOTA: o código usa a API "clássica" do Flet (ex.: Dropdown(on_change=...)).
+# O Flet reescreveu a API a partir da série 0.80. Fixamos abaixo da 0.29 para
+# manter a compatibilidade com a UI atual (0.28.3 é a última release clássica).
+flet>=0.24.0,<0.29
 
 # HTTP requests para xAI API
 requests>=2.31.0
