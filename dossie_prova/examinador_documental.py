@@ -3,6 +3,7 @@ Examinador de Provas Documentais.
 """
 
 import json
+import requests
 from typing import List, Optional
 from .schema import ProvaDocumental
 
@@ -34,8 +35,6 @@ class ExaminadorDocumental:
         Returns:
             Tupla com (lista de provas documentais, lista de avisos)
         """
-        import requests
-        
         prompt = self._construir_prompt(questao_titulo, conteudo_documental, impugnacoes)
         
         headers = {

@@ -3,6 +3,7 @@ Examinador de Provas Periciais.
 """
 
 import json
+import requests
 from typing import List
 from .schema import ProvaPericial
 
@@ -32,8 +33,6 @@ class ExaminadorPericial:
         Returns:
             Tupla com (lista de provas periciais, lista de avisos)
         """
-        import requests
-        
         if not conteudo_pericial or len(conteudo_pericial.strip()) < 50:
             return [], ["Nenhum conteúdo pericial fornecido ou conteúdo muito curto"]
         

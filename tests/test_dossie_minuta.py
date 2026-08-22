@@ -95,7 +95,8 @@ def test_examinador_oral_descarta_depoimento_autointeressado():
         provas, avisos = examinador.examinar(
             "Q1",
             "Horas extras",
-            "Depoimento reclamante: Trabalhei até tarde"
+            "Depoimento pessoal do reclamante João Silva: eu trabalhava "
+            "todos os dias muito além da jornada contratada, sempre até tarde."
         )
         
         assert len(provas) == 1

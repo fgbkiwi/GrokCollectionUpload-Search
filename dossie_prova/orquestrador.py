@@ -226,16 +226,27 @@ class OrquestradorDossie:
         """
         Particiona conteúdo em lotes com overlap para evitar perder contexto.
         """
+        if tamanho_max <= 0:
+            return [conteudo]
+
+        # Passo de avanço entre lotes. O max(1, ...) garante progresso mesmo
+        # quando overlap >= tamanho_max, evitando laço infinito.
+        passo = max(1, tamanho_max - overlap)
+
         lotes = []
         inicio = 0
-        
-        while inicio < len(conteudo):
-            fim = min(inicio + tamanho_max, len(conteudo))
-            lote = conteudo[inicio:fim]
-            lotes.append(lote)
-            inicio = fim - overlap
-            
-            if inicio >= len(conteudo):
+        total = len(conteudo)
+
+        while inicio < total:
+            fim = min(inicio + tamanho_max, total)
+            lotes.append(conteudo[inicio:fim])
+
+            # O lote atual já alcançou o fim do conteúdo: encerra o laço.
+            # (Antes o término dependia de `inicio = fim - overlap >= total`,
+            # que nunca ocorre quando overlap > 0, causando laço infinito.)
+            if fim >= total:
                 break
-        
+
+            inicio += passo
+
         return lotes

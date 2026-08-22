@@ -9,6 +9,7 @@ Coordena a geração da minuta em etapas:
 
 import json
 import re
+import requests
 from typing import List, Optional, Dict, Any, Callable
 from pathlib import Path
 
@@ -257,8 +258,6 @@ class OrquestradorMinuta:
         json_mode: bool = False
     ) -> str:
         """Chama a API xAI."""
-        import requests
-        
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
