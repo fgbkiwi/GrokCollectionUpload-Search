@@ -44,13 +44,13 @@ class AbaConfiguracoes:
         
         self.btn_salvar_prompt = ft.ElevatedButton(
             "Salvar Prompt",
-            icon=ft.icons.SAVE,
+            icon=ft.Icons.SAVE,
             on_click=self._salvar_prompt
         )
         
         self.btn_restaurar_prompt = ft.ElevatedButton(
             "Restaurar Padrão",
-            icon=ft.icons.RESTORE,
+            icon=ft.Icons.RESTORE,
             on_click=self._restaurar_prompt
         )
         
@@ -61,7 +61,7 @@ class AbaConfiguracoes:
         
         self.btn_novo_modelo = ft.ElevatedButton(
             "Novo Modelo Temático",
-            icon=ft.icons.ADD,
+            icon=ft.Icons.ADD,
             on_click=self._novo_modelo
         )
         
@@ -85,7 +85,7 @@ class AbaConfiguracoes:
                             ft.Text(
                                 "As chaves são armazenadas em memória apenas durante a sessão",
                                 size=12,
-                                color=ft.colors.GREY_700
+                                color=ft.Colors.GREY_700
                             ),
                         ]),
                         padding=20,
@@ -177,11 +177,11 @@ class AbaConfiguracoes:
                             ft.Text(modelo.nome, size=14, weight=ft.FontWeight.BOLD),
                             ft.Container(expand=True),
                             ft.IconButton(
-                                icon=ft.icons.EDIT,
+                                icon=ft.Icons.EDIT,
                                 on_click=lambda e, m=modelo: self._editar_modelo(m)
                             ),
                             ft.IconButton(
-                                icon=ft.icons.DELETE,
+                                icon=ft.Icons.DELETE,
                                 on_click=lambda e, m=modelo: self._excluir_modelo(m)
                             ),
                         ]),
@@ -189,7 +189,7 @@ class AbaConfiguracoes:
                         ft.Text(
                             modelo.texto[:100] + "...",
                             size=11,
-                            color=ft.colors.GREY_700
+                            color=ft.Colors.GREY_700
                         ),
                     ]),
                     padding=15,

@@ -27,20 +27,20 @@ class AbaCartao:
         
         self.btn_selecionar = ft.ElevatedButton(
             "Escolher Arquivo MD",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_arquivo
         )
         
         self.btn_extrair = ft.ElevatedButton(
             "Extrair Cartão",
-            icon=ft.icons.PLAY_ARROW,
+            icon=ft.Icons.PLAY_ARROW,
             on_click=self._extrair_cartao,
             disabled=True
         )
         
         self.btn_confirmar = ft.ElevatedButton(
             "Confirmar e Salvar",
-            icon=ft.icons.CHECK,
+            icon=ft.Icons.CHECK,
             on_click=self._confirmar_cartao,
             disabled=True
         )
@@ -174,11 +174,11 @@ class AbaCartao:
         if self.cartao_atual.avisos:
             self.area_resultado.controls.append(ft.Divider())
             self.area_resultado.controls.append(
-                ft.Text("Avisos:", weight=ft.FontWeight.BOLD, color=ft.colors.ORANGE)
+                ft.Text("Avisos:", weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE)
             )
             for aviso in self.cartao_atual.avisos[:5]:
                 self.area_resultado.controls.append(
-                    ft.Text(f"• {aviso.descricao}", size=12, color=ft.colors.ORANGE_700)
+                    ft.Text(f"• {aviso.descricao}", size=12, color=ft.Colors.ORANGE_700)
                 )
         
         self.app.page.update()

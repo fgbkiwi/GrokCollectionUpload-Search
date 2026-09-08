@@ -23,13 +23,13 @@ class AbaIndexador:
         
         self.btn_selecionar_pasta = ft.ElevatedButton(
             "Escolher Pasta de Sentenças (MD)",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_pasta
         )
         
         self.btn_indexar = ft.ElevatedButton(
             "Indexar na Collection",
-            icon=ft.icons.UPLOAD,
+            icon=ft.Icons.UPLOAD,
             on_click=self._indexar,
             disabled=True
         )
@@ -51,7 +51,7 @@ class AbaIndexador:
                             ft.Text(
                                 "Indexa sentenças publicadas na Collection xAI para busca de precedentes",
                                 size=12,
-                                color=ft.colors.GREY_700
+                                color=ft.Colors.GREY_700
                             ),
                             ft.Divider(),
                             ft.Row([
@@ -158,7 +158,7 @@ class AbaIndexador:
     
     def _log(self, mensagem: str, erro: bool = False):
         """Adiciona mensagem ao log."""
-        cor = ft.colors.RED if erro else ft.colors.BLACK
+        cor = ft.Colors.RED if erro else ft.Colors.BLACK
         self.area_log.controls.append(
             ft.Text(mensagem, size=12, color=cor)
         )

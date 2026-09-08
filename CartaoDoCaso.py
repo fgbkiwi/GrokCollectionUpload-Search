@@ -68,24 +68,24 @@ class CartaoDoCasoApp:
         self.campo_arquivo = ft.Text(
             "Nenhum arquivo selecionado",
             size=14,
-            color=ft.colors.GREY_700
+            color=ft.Colors.GREY_700
         )
         
         self.btn_selecionar = ft.ElevatedButton(
             "Escolher Arquivo/Pasta MD",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_arquivo
         )
         
         self.btn_extrair = ft.ElevatedButton(
             "Extrair Cartão",
-            icon=ft.icons.PLAY_ARROW,
+            icon=ft.Icons.PLAY_ARROW,
             on_click=self._extrair_cartao,
             disabled=True
         )
         
         self.progresso = ft.ProgressBar(visible=False, width=600)
-        self.texto_progresso = ft.Text("", size=12, color=ft.colors.BLUE)
+        self.texto_progresso = ft.Text("", size=12, color=ft.Colors.BLUE)
         
         self.abas = ft.Tabs(
             selected_index=0,
@@ -93,22 +93,22 @@ class CartaoDoCasoApp:
             tabs=[
                 ft.Tab(
                     text="Pedidos",
-                    icon=ft.icons.LIST_ALT,
+                    icon=ft.Icons.LIST_ALT,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="Questões",
-                    icon=ft.icons.QUESTION_ANSWER,
+                    icon=ft.Icons.QUESTION_ANSWER,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="Avisos",
-                    icon=ft.icons.WARNING,
+                    icon=ft.Icons.WARNING,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="JSON",
-                    icon=ft.icons.CODE,
+                    icon=ft.Icons.CODE,
                     content=ft.Container(padding=10)
                 ),
             ],
@@ -117,23 +117,23 @@ class CartaoDoCasoApp:
         
         self.btn_confirmar = ft.ElevatedButton(
             "Confirmar Cartão",
-            icon=ft.icons.CHECK_CIRCLE,
+            icon=ft.Icons.CHECK_CIRCLE,
             on_click=self._confirmar_cartao,
             disabled=True,
-            bgcolor=ft.colors.GREEN,
-            color=ft.colors.WHITE
+            bgcolor=ft.Colors.GREEN,
+            color=ft.Colors.WHITE
         )
         
         self.btn_voltar = ft.ElevatedButton(
             "Voltar a Extrair",
-            icon=ft.icons.REFRESH,
+            icon=ft.Icons.REFRESH,
             on_click=self._voltar_extrair,
             disabled=True
         )
         
         self.btn_exportar = ft.ElevatedButton(
             "Exportar JSON",
-            icon=ft.icons.DOWNLOAD,
+            icon=ft.Icons.DOWNLOAD,
             on_click=self._exportar_json,
             disabled=True
         )
@@ -144,16 +144,16 @@ class CartaoDoCasoApp:
                     "Cartão do Caso",
                     size=28,
                     weight=ft.FontWeight.BOLD,
-                    color=ft.colors.BLUE_900
+                    color=ft.Colors.BLUE_900
                 ),
                 ft.Text(
                     "Extração estruturada de autos trabalhistas",
                     size=14,
-                    color=ft.colors.GREY_700
+                    color=ft.Colors.GREY_700
                 ),
             ]),
             padding=20,
-            bgcolor=ft.colors.BLUE_50,
+            bgcolor=ft.Colors.BLUE_50,
         )
         
         painel_config = ft.Card(
@@ -213,12 +213,12 @@ class CartaoDoCasoApp:
             if result.files:
                 self.caminho_arquivo = Path(result.files[0].path)
                 self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.colors.GREEN_700
+                self.campo_arquivo.color = ft.Colors.GREEN_700
                 self._verificar_pode_extrair()
             elif result.path:
                 self.caminho_arquivo = Path(result.path)
                 self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.colors.GREEN_700
+                self.campo_arquivo.color = ft.Colors.GREEN_700
                 self._verificar_pode_extrair()
             self.page.update()
         
@@ -329,7 +329,7 @@ class CartaoDoCasoApp:
                         ft.DataCell(
                             ft.Text(
                                 "Sim" if contestacao and contestacao.impugnacao_especifica else "Não",
-                                color=ft.colors.GREEN if contestacao and contestacao.impugnacao_especifica else ft.colors.RED
+                                color=ft.Colors.GREEN if contestacao and contestacao.impugnacao_especifica else ft.Colors.RED
                             )
                         ),
                     ]
@@ -352,7 +352,7 @@ class CartaoDoCasoApp:
                 ft.Text(f"Total de pedidos: {len(pedidos)}", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(
                     content=tabela,
-                    border=ft.border.all(1, ft.colors.GREY_300),
+                    border=ft.border.all(1, ft.Colors.GREY_300),
                     border_radius=5,
                     padding=10
                 )
@@ -416,11 +416,11 @@ class CartaoDoCasoApp:
                 ft.Text(
                     "✏️ Você pode desmarcar questões que não devem ser mencionadas na minuta",
                     size=12,
-                    color=ft.colors.BLUE_700
+                    color=ft.Colors.BLUE_700
                 ),
                 ft.Container(
                     content=tabela,
-                    border=ft.border.all(1, ft.colors.GREY_300),
+                    border=ft.border.all(1, ft.Colors.GREY_300),
                     border_radius=5,
                     padding=10
                 )
@@ -438,7 +438,7 @@ class CartaoDoCasoApp:
         
         if not avisos:
             self.abas.tabs[2].content = ft.Container(
-                content=ft.Text("✅ Nenhum aviso (extração completa)", size=16, color=ft.colors.GREEN),
+                content=ft.Text("✅ Nenhum aviso (extração completa)", size=16, color=ft.Colors.GREEN),
                 padding=20
             )
             return
@@ -447,18 +447,18 @@ class CartaoDoCasoApp:
         
         for aviso in avisos:
             cor_icone = {
-                "falta_impugnacao_especifica": ft.colors.ORANGE,
-                "possivel_irrelevancia": ft.colors.YELLOW_700,
-                "falta_id_pje": ft.colors.BLUE,
-                "falta_folhas": ft.colors.BLUE,
-                "dado_ausente": ft.colors.RED,
-                "outro": ft.colors.GREY
-            }.get(aviso.tipo, ft.colors.GREY)
+                "falta_impugnacao_especifica": ft.Colors.ORANGE,
+                "possivel_irrelevancia": ft.Colors.YELLOW_700,
+                "falta_id_pje": ft.Colors.BLUE,
+                "falta_folhas": ft.Colors.BLUE,
+                "dado_ausente": ft.Colors.RED,
+                "outro": ft.Colors.GREY
+            }.get(aviso.tipo, ft.Colors.GREY)
             
             itens_avisos.append(
                 ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.icons.WARNING, color=cor_icone, size=24),
+                        ft.Icon(ft.Icons.WARNING, color=cor_icone, size=24),
                         ft.Column([
                             ft.Text(aviso.tipo.replace("_", " ").title(), weight=ft.FontWeight.BOLD),
                             ft.Text(aviso.descricao, size=12),
@@ -467,7 +467,7 @@ class CartaoDoCasoApp:
                     padding=10,
                     border=ft.border.all(1, cor_icone),
                     border_radius=5,
-                    bgcolor=ft.colors.with_opacity(0.1, cor_icone)
+                    bgcolor=ft.Colors.with_opacity(0.1, cor_icone)
                 )
             )
         
@@ -499,7 +499,7 @@ class CartaoDoCasoApp:
                         size=11,
                         font_family="Courier"
                     ),
-                    bgcolor=ft.colors.GREY_900,
+                    bgcolor=ft.Colors.GREY_900,
                     padding=10,
                     border_radius=5
                 )
@@ -565,8 +565,8 @@ class CartaoDoCasoApp:
     def _mostrar_erro(self, mensagem: str):
         """Mostra snackbar de erro."""
         self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(mensagem, color=ft.colors.WHITE),
-            bgcolor=ft.colors.RED_700
+            content=ft.Text(mensagem, color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.RED_700
         )
         self.page.snack_bar.open = True
         self.page.update()
@@ -574,15 +574,15 @@ class CartaoDoCasoApp:
     def _mostrar_sucesso(self, mensagem: str):
         """Mostra snackbar de sucesso."""
         self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(mensagem, color=ft.colors.WHITE),
-            bgcolor=ft.colors.GREEN_700
+            content=ft.Text(mensagem, color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.GREEN_700
         )
         self.page.snack_bar.open = True
         self.page.update()
     
     def _mostrar_dialogo(self, titulo: str, mensagem: str, sucesso: bool = False):
         """Mostra diálogo modal."""
-        cor = ft.colors.GREEN if sucesso else ft.colors.BLUE
+        cor = ft.Colors.GREEN if sucesso else ft.Colors.BLUE
         
         dlg = ft.AlertDialog(
             title=ft.Text(titulo, color=cor, weight=ft.FontWeight.BOLD),

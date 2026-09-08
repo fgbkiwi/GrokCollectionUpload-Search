@@ -31,7 +31,7 @@ class AbaMinuta:
         self.texto_status = ft.Text(
             "Aguardando cartão e dossiê confirmados...",
             size=14,
-            color=ft.colors.ORANGE
+            color=ft.Colors.ORANGE
         )
         
         self.dropdown_collection = ft.Dropdown(
@@ -60,14 +60,14 @@ class AbaMinuta:
         
         self.btn_gerar_estrutura = ft.ElevatedButton(
             "Gerar Estrutura",
-            icon=ft.icons.ACCOUNT_TREE,
+            icon=ft.Icons.ACCOUNT_TREE,
             on_click=self._gerar_estrutura,
             disabled=True
         )
         
         self.btn_gerar_minuta = ft.ElevatedButton(
             "Gerar Minuta",
-            icon=ft.icons.CREATE,
+            icon=ft.Icons.CREATE,
             on_click=self._gerar_minuta,
             disabled=True
         )
@@ -117,7 +117,7 @@ class AbaMinuta:
     def habilitar_geracao(self):
         """Habilita geração após dossiê confirmado."""
         self.texto_status.value = "Cartão e dossiê confirmados! Configure a Collection."
-        self.texto_status.color = ft.colors.GREEN
+        self.texto_status.color = ft.Colors.GREEN
         self.dropdown_collection.disabled = False
         self._carregar_collections()
         self.app.page.update()

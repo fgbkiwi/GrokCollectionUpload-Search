@@ -136,14 +136,14 @@ class IndexadorSentencasApp:
         )
         
         self.btn_refresh_collections = ft.IconButton(
-            icon=ft.icons.REFRESH,
+            icon=ft.Icons.REFRESH,
             tooltip="Atualizar lista de Collections",
             on_click=self.refresh_collections,
         )
         
         self.btn_new_collection = ft.ElevatedButton(
             text="Nova Collection",
-            icon=ft.icons.ADD,
+            icon=ft.Icons.ADD,
             on_click=self.criar_nova_collection,
         )
         
@@ -173,12 +173,12 @@ class IndexadorSentencasApp:
         privacy_section = ft.Card(
             content=ft.Container(
                 content=ft.Column([
-                    ft.Icon(ft.icons.WARNING, color=ft.colors.ORANGE, size=40),
+                    ft.Icon(ft.Icons.WARNING, color=ft.Colors.ORANGE, size=40),
                     ft.Text(
                         "⚠️ AVISO IMPORTANTE",
                         size=16,
                         weight=ft.FontWeight.BOLD,
-                        color=ft.colors.ORANGE,
+                        color=ft.Colors.ORANGE,
                     ),
                     ft.Text(
                         "Indexe apenas sentenças públicas. "
@@ -188,7 +188,7 @@ class IndexadorSentencasApp:
                     self.privacy_checkbox,
                 ]),
                 padding=15,
-                bgcolor=ft.colors.ORANGE_50,
+                bgcolor=ft.Colors.ORANGE_50,
             ),
         )
         
@@ -197,13 +197,13 @@ class IndexadorSentencasApp:
         
         self.btn_select_folder = ft.ElevatedButton(
             text="Selecionar Pasta",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self.selecionar_pasta,
         )
         
         self.btn_scan = ft.ElevatedButton(
             text="Varrer Arquivos",
-            icon=ft.icons.SEARCH,
+            icon=ft.Icons.SEARCH,
             on_click=self.varrer_arquivos,
             disabled=True,
         )
@@ -257,7 +257,7 @@ class IndexadorSentencasApp:
         # Botões de ação
         self.btn_indexar = ft.ElevatedButton(
             text="Indexar Selecionados",
-            icon=ft.icons.UPLOAD,
+            icon=ft.Icons.UPLOAD,
             on_click=self.iniciar_indexacao,
             disabled=True,
         )
@@ -272,7 +272,7 @@ class IndexadorSentencasApp:
                 self.log_text,
             ], scroll=ft.ScrollMode.AUTO),
             height=150,
-            bgcolor=ft.colors.GREY_100,
+            bgcolor=ft.Colors.GREY_100,
             padding=10,
             border_radius=5,
         )
@@ -431,7 +431,7 @@ class IndexadorSentencasApp:
                     "- reclamada\n"
                     "- tipo_acao",
                     size=12,
-                    color=ft.colors.GREY_700,
+                    color=ft.Colors.GREY_700,
                 ),
             ], tight=True),
             actions=[
@@ -519,13 +519,13 @@ class IndexadorSentencasApp:
                 # Status
                 if novos > 0 and existentes == 0:
                     status = f"✨ Novo ({len(info['registros'])} tópicos)"
-                    status_color = ft.colors.GREEN
+                    status_color = ft.Colors.GREEN
                 elif novos == 0:
                     status = "✅ Já indexado"
-                    status_color = ft.colors.GREY
+                    status_color = ft.Colors.GREY
                 else:
                     status = f"⚠️ Parcial ({novos} novos, {existentes} existentes)"
-                    status_color = ft.colors.ORANGE
+                    status_color = ft.Colors.ORANGE
                 
                 # Cria checkbox para seleção
                 checkbox = ft.Checkbox(value=novos > 0, data=path)

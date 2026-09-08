@@ -24,7 +24,7 @@ class AbaDossie:
         self.texto_status_cartao = ft.Text(
             "Aguardando cartão confirmado...",
             size=14,
-            color=ft.colors.ORANGE
+            color=ft.Colors.ORANGE
         )
         
         self.campo_autos = ft.Text(
@@ -34,21 +34,21 @@ class AbaDossie:
         
         self.btn_selecionar_autos = ft.ElevatedButton(
             "Escolher Autos (MD)",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_autos,
             disabled=True
         )
         
         self.btn_montar = ft.ElevatedButton(
             "Montar Dossiê",
-            icon=ft.icons.BUILD,
+            icon=ft.Icons.BUILD,
             on_click=self._montar_dossie,
             disabled=True
         )
         
         self.btn_confirmar = ft.ElevatedButton(
             "Confirmar Dossiê",
-            icon=ft.icons.CHECK,
+            icon=ft.Icons.CHECK,
             on_click=self._confirmar_dossie,
             disabled=True
         )
@@ -97,7 +97,7 @@ class AbaDossie:
     def habilitar_montagem(self):
         """Habilita a montagem após cartão confirmado."""
         self.texto_status_cartao.value = f"Cartão confirmado: {self.cartao_confirmado.numero_processo or 'processo'}"
-        self.texto_status_cartao.color = ft.colors.GREEN
+        self.texto_status_cartao.color = ft.Colors.GREEN
         self.btn_selecionar_autos.disabled = False
         self.app.page.update()
     

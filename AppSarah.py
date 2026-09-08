@@ -51,27 +51,27 @@ class AppSarah:
             tabs=[
                 ft.Tab(
                     text="Cartão do Caso",
-                    icon=ft.icons.DESCRIPTION,
+                    icon=ft.Icons.DESCRIPTION,
                     content=self.aba_cartao.construir()
                 ),
                 ft.Tab(
                     text="Dossiê de Prova",
-                    icon=ft.icons.FOLDER_COPY,
+                    icon=ft.Icons.FOLDER_COPY,
                     content=self.aba_dossie.construir()
                 ),
                 ft.Tab(
                     text="Minuta",
-                    icon=ft.icons.EDIT_DOCUMENT,
+                    icon=ft.Icons.EDIT_DOCUMENT,
                     content=self.aba_minuta.construir()
                 ),
                 ft.Tab(
                     text="Indexador",
-                    icon=ft.icons.UPLOAD_FILE,
+                    icon=ft.Icons.UPLOAD_FILE,
                     content=self.aba_indexador.construir()
                 ),
                 ft.Tab(
                     text="Configurações",
-                    icon=ft.icons.SETTINGS,
+                    icon=ft.Icons.SETTINGS,
                     content=self.aba_config.construir()
                 ),
             ],
@@ -80,18 +80,18 @@ class AppSarah:
         header = ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(ft.icons.GAVEL, size=32, color=ft.colors.BLUE_700),
+                    ft.Icon(ft.Icons.GAVEL, size=32, color=ft.Colors.BLUE_700),
                     ft.Text(
                         "Sarah - Sistema de Assistência Judicial",
                         size=24,
                         weight=ft.FontWeight.BOLD,
-                        color=ft.colors.BLUE_700
+                        color=ft.Colors.BLUE_700
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
             ),
             padding=20,
-            bgcolor=ft.colors.BLUE_50,
+            bgcolor=ft.Colors.BLUE_50,
         )
         
         self.page.add(
