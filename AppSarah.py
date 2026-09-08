@@ -138,10 +138,10 @@ class AppSarah:
         self.page.update()
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     """Ponto de entrada da aplicação."""
     app = AppSarah(page)
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(target=main)

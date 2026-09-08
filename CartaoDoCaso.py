@@ -590,7 +590,7 @@ class CartaoDoCasoApp:
         self.page.update()
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     """Função principal da aplicação."""
     app = CartaoDoCasoApp(page)
 
