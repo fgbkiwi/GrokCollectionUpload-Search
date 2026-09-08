@@ -85,25 +85,22 @@ class AbaCartao:
             expand=True,
         )
     
-    def _selecionar_arquivo(self, e):
+    async def _selecionar_arquivo(self, e):
         """Abre diálogo de seleção de arquivo."""
-        def on_result(result: ft.FilePickerResultEvent):
-            if result.files:
-                self.caminho_arquivo = Path(result.files[0].path)
-                self.campo_arquivo.value = self.caminho_arquivo.name
-                self.btn_extrair.disabled = False
-                self.app.page.update()
-        
-        picker = ft.FilePicker(on_result=on_result)
-        self.app.page.overlay.append(picker)
-        self.app.page.update()
-        
-        picker.pick_files(
+        picker = ft.FilePicker()
+        files = await picker.pick_files(
             allowed_extensions=["md"],
-            dialog_title="Selecione o arquivo MD dos autos"
+            dialog_title="Selecione o arquivo MD dos autos",
+            allow_multiple=False
         )
+        
+        if files:
+            self.caminho_arquivo = Path(files[0].path)
+            self.campo_arquivo.value = self.caminho_arquivo.name
+            self.btn_extrair.disabled = False
+            self.app.page.update()
     
-    def _extrair_cartao(self, e):
+    async def _extrair_cartao(self, e):
         """Extrai o cartão do caso."""
         if not self.caminho_arquivo:
             self.app.mostrar_erro("Selecione um arquivo primeiro")
@@ -183,7 +180,7 @@ class AbaCartao:
         
         self.app.page.update()
     
-    def _confirmar_cartao(self, e):
+    async def _confirmar_cartao(self, e):
         """Confirma e salva o cartão."""
         if not self.cartao_atual:
             return

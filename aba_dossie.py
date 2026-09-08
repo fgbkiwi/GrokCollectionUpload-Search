@@ -101,25 +101,22 @@ class AbaDossie:
         self.btn_selecionar_autos.disabled = False
         self.app.page.update()
     
-    def _selecionar_autos(self, e):
+    async def _selecionar_autos(self, e):
         """Seleciona arquivo de autos."""
-        def on_result(result: ft.FilePickerResultEvent):
-            if result.files:
-                self.caminho_autos = Path(result.files[0].path)
-                self.campo_autos.value = self.caminho_autos.name
-                self.btn_montar.disabled = False
-                self.app.page.update()
-        
-        picker = ft.FilePicker(on_result=on_result)
-        self.app.page.overlay.append(picker)
-        self.app.page.update()
-        
-        picker.pick_files(
+        picker = ft.FilePicker()
+        files = await picker.pick_files(
             allowed_extensions=["md"],
-            dialog_title="Selecione o arquivo MD dos autos"
+            dialog_title="Selecione o arquivo MD dos autos",
+            allow_multiple=False
         )
+        
+        if files:
+            self.caminho_autos = Path(files[0].path)
+            self.campo_autos.value = self.caminho_autos.name
+            self.btn_montar.disabled = False
+            self.app.page.update()
     
-    def _montar_dossie(self, e):
+    async def _montar_dossie(self, e):
         """Monta o dossiê de prova."""
         if not self.cartao_confirmado or not self.caminho_autos:
             self.app.mostrar_erro("Cartão e autos são necessários")
@@ -195,7 +192,7 @@ class AbaDossie:
         
         self.app.page.update()
     
-    def _confirmar_dossie(self, e):
+    async def _confirmar_dossie(self, e):
         """Confirma e salva o dossiê."""
         if not self.dossie_atual:
             return

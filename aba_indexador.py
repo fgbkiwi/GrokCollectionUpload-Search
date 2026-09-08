@@ -76,24 +76,20 @@ class AbaIndexador:
             expand=True,
         )
     
-    def _selecionar_pasta(self, e):
+    async def _selecionar_pasta(self, e):
         """Seleciona pasta de sentenças."""
-        def on_result(result: ft.FilePickerResultEvent):
-            if result.path:
-                self.caminho_pasta = Path(result.path)
-                self.campo_pasta.value = str(self.caminho_pasta)
-                self.btn_indexar.disabled = False
-                self.app.page.update()
-        
-        picker = ft.FilePicker(on_result=on_result)
-        self.app.page.overlay.append(picker)
-        self.app.page.update()
-        
-        picker.get_directory_path(
+        picker = ft.FilePicker()
+        path = await picker.get_directory_path(
             dialog_title="Selecione a pasta com sentenças em MD"
         )
+        
+        if path:
+            self.caminho_pasta = Path(path)
+            self.campo_pasta.value = str(self.caminho_pasta)
+            self.btn_indexar.disabled = False
+            self.app.page.update()
     
-    def _indexar(self, e):
+    async def _indexar(self, e):
         """Indexa sentenças na Collection."""
         if not self.caminho_pasta:
             return

@@ -207,37 +207,28 @@ class CartaoDoCasoApp:
         self.btn_extrair.disabled = not (self.api_key and self.caminho_arquivo)
         self.page.update()
     
-    def _selecionar_arquivo(self, e):
+    async def _selecionar_arquivo(self, e):
         """Abre diálogo para selecionar arquivo ou pasta."""
-        def resultado_arquivo(result: ft.FilePickerResultEvent):
-            if result.files:
-                self.caminho_arquivo = Path(result.files[0].path)
-                self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.Colors.GREEN_700
-                self._verificar_pode_extrair()
-            elif result.path:
-                self.caminho_arquivo = Path(result.path)
-                self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.Colors.GREEN_700
-                self._verificar_pode_extrair()
-            self.page.update()
-        
-        picker = ft.FilePicker(on_result=resultado_arquivo)
-        self.page.overlay.append(picker)
-        self.page.update()
-        
-        picker.pick_files(
+        picker = ft.FilePicker()
+        files = await picker.pick_files(
             dialog_title="Escolher arquivo MD de autos",
             allowed_extensions=["md"],
             allow_multiple=False
         )
+        
+        if files:
+            self.caminho_arquivo = Path(files[0].path)
+            self.campo_arquivo.value = str(self.caminho_arquivo)
+            self.campo_arquivo.color = ft.Colors.GREEN_700
+            self._verificar_pode_extrair()
+            self.page.update()
     
     def _mostrar_progresso(self, mensagem: str):
         """Mostra progresso."""
         self.texto_progresso.value = mensagem
         self.page.update()
     
-    def _extrair_cartao(self, e):
+    async def _extrair_cartao(self, e):
         """Extrai cartão do arquivo selecionado."""
         if not self.api_key:
             self._mostrar_erro("Configure a API Key primeiro")
@@ -538,29 +529,25 @@ class CartaoDoCasoApp:
         self.cartao_atual = None
         self.page.update()
     
-    def _exportar_json(self, e):
+    async def _exportar_json(self, e):
         """Exporta JSON para local escolhido pelo usuário."""
-        def resultado_exportar(result: ft.FilePickerResultEvent):
-            if result.path:
-                try:
-                    caminho_destino = Path(result.path)
-                    if not caminho_destino.suffix:
-                        caminho_destino = caminho_destino.with_suffix(".json")
-                    
-                    self.persistencia.exportar_cartao(self.cartao_atual, caminho_destino)
-                    self._mostrar_sucesso(f"JSON exportado para: {caminho_destino}")
-                except Exception as ex:
-                    self._mostrar_erro(f"Erro ao exportar: {ex}")
-        
-        picker = ft.FilePicker(on_result=resultado_exportar)
-        self.page.overlay.append(picker)
-        self.page.update()
-        
-        picker.save_file(
+        picker = ft.FilePicker()
+        path = await picker.save_file(
             dialog_title="Exportar JSON do Cartão",
             file_name=f"cartao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             allowed_extensions=["json"]
         )
+        
+        if path:
+            try:
+                caminho_destino = Path(path)
+                if not caminho_destino.suffix:
+                    caminho_destino = caminho_destino.with_suffix(".json")
+                
+                self.persistencia.exportar_cartao(self.cartao_atual, caminho_destino)
+                self._mostrar_sucesso(f"JSON exportado para: {caminho_destino}")
+            except Exception as ex:
+                self._mostrar_erro(f"Erro ao exportar: {ex}")
     
     def _mostrar_erro(self, mensagem: str):
         """Mostra snackbar de erro."""
