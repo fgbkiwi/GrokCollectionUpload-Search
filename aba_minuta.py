@@ -31,7 +31,7 @@ class AbaMinuta:
         self.texto_status = ft.Text(
             "Aguardando cartão e dossiê confirmados...",
             size=14,
-            color=ft.colors.ORANGE
+            color=ft.Colors.ORANGE
         )
         
         self.dropdown_collection = ft.Dropdown(
@@ -60,14 +60,14 @@ class AbaMinuta:
         
         self.btn_gerar_estrutura = ft.ElevatedButton(
             "Gerar Estrutura",
-            icon=ft.icons.ACCOUNT_TREE,
+            icon=ft.Icons.ACCOUNT_TREE,
             on_click=self._gerar_estrutura,
             disabled=True
         )
         
         self.btn_gerar_minuta = ft.ElevatedButton(
             "Gerar Minuta",
-            icon=ft.icons.CREATE,
+            icon=ft.Icons.CREATE,
             on_click=self._gerar_minuta,
             disabled=True
         )
@@ -117,7 +117,7 @@ class AbaMinuta:
     def habilitar_geracao(self):
         """Habilita geração após dossiê confirmado."""
         self.texto_status.value = "Cartão e dossiê confirmados! Configure a Collection."
-        self.texto_status.color = ft.colors.GREEN
+        self.texto_status.color = ft.Colors.GREEN
         self.dropdown_collection.disabled = False
         self._carregar_collections()
         self.app.page.update()
@@ -135,17 +135,36 @@ class AbaMinuta:
                 self.app.management_key
             )
             
-            collections = busca.listar_collections()
+            collections = [
+                c for c in busca.listar_collections()
+                if c.get("id")
+            ]
+            
+            if not collections:
+                self.app.mostrar_erro(
+                    "Nenhuma Collection encontrada. Verifique a Management Key "
+                    "ou crie uma Collection no console xAI."
+                )
+                return
             
             self.dropdown_collection.options = [
-                ft.dropdown.Option(c["id"], c["name"])
+                ft.dropdown.Option(
+                    key=c["id"],
+                    text=c.get("name") or c["id"],
+                )
                 for c in collections
             ]
             
-            if collections:
-                self.dropdown_collection.value = collections[0]["id"]
-                self.collection_id = collections[0]["id"]
-                self.btn_gerar_estrutura.disabled = False
+            preferida = getattr(self.app, "selected_collection_id", None)
+            ids = {c["id"] for c in collections}
+            if preferida and preferida in ids:
+                escolhida = preferida
+            else:
+                escolhida = collections[0]["id"]
+            
+            self.dropdown_collection.value = escolhida
+            self.collection_id = escolhida
+            self.btn_gerar_estrutura.disabled = False
             
             self.app.page.update()
             
@@ -175,7 +194,8 @@ class AbaMinuta:
             orquestrador = OrquestradorMinuta(
                 api_key=self.app.api_key,
                 management_key=self.app.management_key,
-                modelo="grok-beta"
+                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
+                reasoning_effort=getattr(self.app, "reasoning_effort", None),
             )
             
             if self.collection_id:
@@ -234,7 +254,8 @@ class AbaMinuta:
             orquestrador = OrquestradorMinuta(
                 api_key=self.app.api_key,
                 management_key=self.app.management_key,
-                modelo="grok-beta"
+                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
+                reasoning_effort=getattr(self.app, "reasoning_effort", None),
             )
             
             if self.collection_id:

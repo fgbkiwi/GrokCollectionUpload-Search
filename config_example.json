@@ -6,13 +6,22 @@
   "management_key": "xai-YOUR_MANAGEMENT_KEY_HERE",
   "collection_id": "col_YOUR_COLLECTION_ID_HERE",
   
-  "grok_model": "grok-beta",
+  "grok_model": "grok-4.6",
+  "reasoning_effort": "high",
+  "_reasoning_effort_options": {
+    "grok-4.7": ["low", "medium", "high", "xhigh"],
+    "grok-4.6": ["low", "medium", "high", "xhigh"],
+    "grok-4.5": ["low", "medium", "high"],
+    "grok-4.3": ["none", "low", "medium", "high"]
+  },
+  "_reasoning_effort_note": "Preferir capabilities.reasoning_effort de GET /v1/models. Fallback estático só se a API falhar.",
   "_grok_model_options": [
-    "grok-beta",
-    "grok-2-1212",
-    "grok-2-vision-1212"
+    "grok-4.7",
+    "grok-4.6",
+    "grok-4.5",
+    "grok-4.3"
   ],
-  "_grok_model_note": "grok-beta é rápido e bom. grok-2-1212 é mais preciso mas mais lento.",
+  "_grok_model_note": "A UI lista dinamicamente só modelos com capabilities.reasoning_effort.",
   
   "output_dir": "./sentencas_md_v2",
   "_output_dir_note": "Diretório onde serão salvos os arquivos MD locais",

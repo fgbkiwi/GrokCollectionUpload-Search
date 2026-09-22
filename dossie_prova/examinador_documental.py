@@ -5,14 +5,21 @@ Examinador de Provas Documentais.
 import json
 from typing import List, Optional
 from .schema import ProvaDocumental
+from xai_reasoning import aplicar_reasoning_effort
 
 
 class ExaminadorDocumental:
     """Examina provas documentais dos autos."""
     
-    def __init__(self, api_key: str, modelo: str = "grok-beta"):
+    def __init__(
+        self,
+        api_key: str,
+        modelo: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
+    ):
         self.api_key = api_key
         self.modelo = modelo
+        self.reasoning_effort = reasoning_effort
         self.base_url = "https://api.x.ai/v1"
     
     def examinar(
@@ -58,6 +65,7 @@ class ExaminadorDocumental:
             "temperature": 0.1,
             "response_format": {"type": "json_object"}
         }
+        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
         
         try:
             response = requests.post(
@@ -81,6 +89,11 @@ class ExaminadorDocumental:
                     avisos = dados.get("avisos", [])
                     avisos.append(f"Erro ao validar prova documental: {e}")
             
+            from pje_ids import enriquecer_id_em_objetos, normalizar_id_pje
+            for prova in provas:
+                prova.id_pje = normalizar_id_pje(prova.id_pje)
+            enriquecer_id_em_objetos(provas, conteudo_documental)
+            
             avisos = dados.get("avisos", [])
             return provas, avisos
             
@@ -99,7 +112,7 @@ REGRAS DE VALORAÇÃO DOCUMENTAL:
    e o reclamante alegou a irregularidade, isso configura confissão ficta (art. 341 CPC, art. 167 §1º CC)
 3. Impugnação específica deve ter grau de detalhe equivalente ao alegado
 4. NUNCA invente ID do PJe, número de folhas, horário ou qualquer dado que não esteja no texto fornecido
-5. Se não houver ID ou folhas, deixe null e avise
+5. ID do PJe: string alfanumérica de 7 caracteres (ex.: c7dbfbc), tipicamente no final da linha "Documento assinado eletronicamente por ..., em DD/MM/AAAA, às HH:MM:SS - XXXXXXX". Também "ID XXXXXXX" / "(ID XXXXXXX)". Se não houver, deixe null (NÃO escreva "não informado") e avise
 6. Transcreva literalmente trechos relevantes, não parafrasear
 
 FORMATO DE SAÍDA (JSON):
@@ -107,7 +120,7 @@ FORMATO DE SAÍDA (JSON):
   "provas_documentais": [
     {
       "trecho": "texto literal do documento",
-      "id_pje": "ID xxxxx" ou null,
+      "id_pje": "c7dbfbc" ou null,
       "folhas": "fls. XX" ou null,
       "relevancia": "alta|media|baixa",
       "favoravel_a": "autor|reu|neutro",

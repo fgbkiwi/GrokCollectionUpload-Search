@@ -1,8 +1,8 @@
 # Requirements para Indexador de Sentenças Trabalhistas
 # Sistema completo de extração e indexação em xAI Collections
 
-# Framework de UI
-flet>=0.24.0
+# Framework de UI (0.25–0.28; evitar Flet 0.70+/V1)
+flet>=0.25.0,<0.70
 
 # HTTP requests para xAI API
 requests>=2.31.0

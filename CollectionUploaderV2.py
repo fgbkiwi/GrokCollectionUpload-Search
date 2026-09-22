@@ -27,9 +27,15 @@ from datetime import datetime
 class GrokKeywordGenerator:
     """Gerador de keywords usando modelo Grok."""
     
-    def __init__(self, api_key: str, model: str = "grok-beta"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
+    ):
         self.api_key = api_key
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self.base_url = "https://api.x.ai/v1"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
@@ -81,24 +87,27 @@ Responda APENAS com o JSON, sem explicações adicionais."""
 
         for attempt in range(max_retries):
             try:
+                from xai_reasoning import aplicar_reasoning_effort
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "Você é um especialista em Direito do Trabalho brasileiro. Sua tarefa é extrair keywords precisas e relevantes de fundamentações jurídicas. Seja específico e evite termos genéricos."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "temperature": 0.3,  # Mais conservador para consistência
+                    "max_tokens": 500
+                }
+                aplicar_reasoning_effort(payload, self.model, self.reasoning_effort)
                 response = requests.post(
                     f"{self.base_url}/chat/completions",
                     headers=self.headers,
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": "Você é um especialista em Direito do Trabalho brasileiro. Sua tarefa é extrair keywords precisas e relevantes de fundamentações jurídicas. Seja específico e evite termos genéricos."
-                            },
-                            {
-                                "role": "user",
-                                "content": prompt
-                            }
-                        ],
-                        "temperature": 0.3,  # Mais conservador para consistência
-                        "max_tokens": 500
-                    },
+                    json=payload,
                     timeout=60
                 )
                 response.raise_for_status()
@@ -213,13 +222,18 @@ class SentencaProcessorV2:
         management_key: str,
         collection_id: str,
         output_dir: str = "./sentencas_md",
-        grok_model: str = "grok-beta",
-        save_local_md: bool = True
+        grok_model: str = "grok-4.6",
+        save_local_md: bool = True,
+        reasoning_effort: Optional[str] = None,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.keyword_generator = GrokKeywordGenerator(grok_api_key, grok_model)
+        self.keyword_generator = GrokKeywordGenerator(
+            grok_api_key,
+            grok_model,
+            reasoning_effort=reasoning_effort,
+        )
         self.uploader = XAICollectionsUploader(management_key, collection_id)
         self.save_local_md = save_local_md
         
@@ -430,7 +444,7 @@ Exemplo de config.json:
   "grok_api_key": "xai-xxx",
   "management_key": "xai-mgmt-xxx",
   "collection_id": "col_xxx",
-  "grok_model": "grok-beta",
+  "grok_model": "grok-4.6",
   "output_dir": "./sentencas_md",
   "save_local_md": true
 }
@@ -480,8 +494,9 @@ Uso:
         management_key=config['management_key'],
         collection_id=config['collection_id'],
         output_dir=config.get('output_dir', './sentencas_md'),
-        grok_model=config.get('grok_model', 'grok-beta'),
-        save_local_md=config.get('save_local_md', True)
+        grok_model=config.get('grok_model', 'grok-4.6'),
+        save_local_md=config.get('save_local_md', True),
+        reasoning_effort=config.get('reasoning_effort'),
     )
     
     try:

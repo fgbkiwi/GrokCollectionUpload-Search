@@ -7,8 +7,8 @@ requests>=2.31.0
 # Validação de schema
 pydantic>=2.0.0
 
-# Interface gráfica
-flet>=0.23.0
+# Interface gráfica (0.25–0.28; evitar Flet 0.70+/V1)
+flet>=0.25.0,<0.70
 
 # Testes
 pytest>=7.4.0

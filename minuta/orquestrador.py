@@ -17,6 +17,7 @@ from dossie_prova import DossieProva, DossieQuestao
 from .schema import (
     EstruturaMinuta,
     TopicoEstrutura,
+    TipoTopico,
     MinutaTopico,
     MinutaDefinitiva,
     MinutaCompleta,
@@ -25,6 +26,7 @@ from .schema import (
 from .kernel_sarah import KernelSarah
 from .busca_precedentes import BuscaPrecedentes
 from .modelos_tematicos import BibliotecaModelos
+from pje_ids import extrair_ids_pje_do_texto, normalizar_id_pje
 
 
 class OrquestradorMinuta:
@@ -34,11 +36,13 @@ class OrquestradorMinuta:
         self,
         api_key: str,
         management_key: Optional[str] = None,
-        modelo: str = "grok-beta"
+        modelo: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
     ):
         self.api_key = api_key
         self.management_key = management_key
         self.modelo = modelo
+        self.reasoning_effort = reasoning_effort
         self.kernel = KernelSarah()
         self.biblioteca = BibliotecaModelos()
         self.busca: Optional[BuscaPrecedentes] = None
@@ -87,7 +91,20 @@ class OrquestradorMinuta:
             
             topicos = []
             for t in dados.get("topicos", []):
-                topico = TopicoEstrutura(**t)
+                if not isinstance(t, dict):
+                    continue
+                qid = t.get("questao_id")
+                if isinstance(qid, str) and qid.strip().lower() in ("null", "none", ""):
+                    t["questao_id"] = None
+                tipo_raw = t.get("tipo")
+                if isinstance(tipo_raw, str) and tipo_raw.strip().lower() in ("null", "none", ""):
+                    t.pop("tipo", None)
+                try:
+                    topico = TopicoEstrutura(**t)
+                except Exception:
+                    t["tipo"] = TipoTopico.OUTRO.value
+                    topico = TopicoEstrutura(**t)
+                topico = self._normalizar_tipo_topico(topico)
                 topicos.append(topico)
             
             estrutura = EstruturaMinuta(topicos=topicos)
@@ -117,14 +134,18 @@ class OrquestradorMinuta:
         """
         avisos = []
         
-        dossie_questao = None
-        if topico.questao_id:
-            for dq in dossie.dossies_por_questao:
-                if dq.questao_id == topico.questao_id:
-                    dossie_questao = dq
-                    break
+        dossie_questao = self._obter_dossie_questao(topico, dossie)
+        if (
+            topico.tipo == TipoTopico.MERITO_QUESTAO
+            and topico.questao_id
+            and dossie_questao is None
+        ):
+            avisos.append(
+                f"Nenhum dossiê encontrado para questao_id={topico.questao_id} "
+                f"(tópico: {topico.titulo})"
+            )
         
-        prompt_previa = self._construir_prompt_previa(topico, cartao, dossie_questao)
+        prompt_previa = self._construir_prompt_previa(topico, cartao, dossie_questao, dossie)
         
         prompt_sistema = self.kernel.obter_prompt()
         
@@ -177,15 +198,22 @@ class OrquestradorMinuta:
         """
         avisos = []
         
-        dossie_questao = None
-        if topico.questao_id:
-            for dq in dossie.dossies_por_questao:
-                if dq.questao_id == topico.questao_id:
-                    dossie_questao = dq
-                    break
+        dossie_questao = self._obter_dossie_questao(topico, dossie)
+        if (
+            topico.tipo == TipoTopico.MERITO_QUESTAO
+            and topico.questao_id
+            and dossie_questao is None
+        ):
+            avisos.append(
+                f"Nenhum dossiê encontrado para questao_id={topico.questao_id} "
+                f"(tópico: {topico.titulo})"
+            )
         
         precedentes = []
-        if self.busca and criterios_busca:
+        if self.busca and criterios_busca and topico.tipo in (
+            TipoTopico.MERITO_QUESTAO,
+            TipoTopico.PRELIMINAR,
+        ):
             precedentes, avisos_busca = self._buscar_precedentes(
                 topico,
                 criterios_busca
@@ -199,6 +227,7 @@ class OrquestradorMinuta:
             minuta_previa,
             cartao,
             dossie_questao,
+            dossie,
             precedentes,
             modelos_tema
         )
@@ -258,6 +287,7 @@ class OrquestradorMinuta:
     ) -> str:
         """Chama a API xAI."""
         import requests
+        from xai_reasoning import aplicar_reasoning_effort
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -275,6 +305,7 @@ class OrquestradorMinuta:
         
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
         
         response = requests.post(
             f"{self.base_url}/chat/completions",
@@ -297,39 +328,248 @@ class OrquestradorMinuta:
             f"- {q.id}: {q.titulo} (momento: {q.momento})"
             for q in cartao.questoes if q.mencionar_na_minuta
         ])
+        resumo_dossie = self._resumo_dossie_para_estrutura(dossie)
         
         return f"""Gere a estrutura de tópicos da sentença trabalhista.
 
-QUESTÕES A DECIDIR:
+QUESTÕES A DECIDIR (use exatamente o ID indicado em questao_id):
 {questoes_str}
+
+RESUMO DO DOSSIÊ DE PROVAS (para orientar a ordem; NÃO invente provas):
+{resumo_dossie}
 
 REGRAS:
 - Pressupostos e condições da ação SÓ se arguidos OU se extinguem
 - Depois mérito na ordem trabalhista usual
 - Níveis hierárquicos: 1 (seção principal), 2 (subseção), 3 (item)
+- Inclua EXATAMENTE um tópico tipo "relatorio" (sem questao_id)
+- Para cada questão listada acima, um tópico tipo "merito_questao" (ou "preliminar") com questao_id exato (Q1, Q2...)
+- Inclua EXATAMENTE um tópico tipo "dispositivo" ao final (sem questao_id)
+- NÃO crie tópico genérico "Mérito" sem questao_id
+- Valores de tipo: "relatorio" | "preliminar" | "merito_questao" | "dispositivo"
 
 FORMATO JSON:
 {{
   "topicos": [
     {{
       "id": "T1",
-      "titulo": "Título",
+      "titulo": "Relatório",
       "nivel": 1,
       "ordem": 1,
-      "questao_id": "Q1" ou null
+      "questao_id": null,
+      "tipo": "relatorio"
+    }},
+    {{
+      "id": "T2",
+      "titulo": "Título da questão",
+      "nivel": 1,
+      "ordem": 2,
+      "questao_id": "Q1",
+      "tipo": "merito_questao"
+    }},
+    {{
+      "id": "T3",
+      "titulo": "Dispositivo",
+      "nivel": 1,
+      "ordem": 3,
+      "questao_id": null,
+      "tipo": "dispositivo"
     }}
   ]
 }}
 
 Retorne JSON válido."""
     
+    def _resumo_dossie_para_estrutura(self, dossie: DossieProva) -> str:
+        """Resumo curto do dossiê para a fase de estrutura."""
+        if not dossie.dossies_por_questao:
+            return "(nenhum dossiê por questão disponível)"
+        linhas = []
+        for dq in dossie.dossies_por_questao:
+            linhas.append(
+                f"- {dq.questao_id} ({dq.questao_titulo}): "
+                f"{len(dq.provas_documentais)} doc, "
+                f"{len(dq.provas_periciais)} per, "
+                f"{len(dq.provas_orais)} oral"
+            )
+        return "\n".join(linhas)
+    
+    def _normalizar_tipo_topico(self, topico: TopicoEstrutura) -> TopicoEstrutura:
+        """Infere/normaliza o papel do tópico quando a LLM omite ou erra o tipo."""
+        titulo = self._normalizar_texto(topico.titulo)
+        tipo = topico.tipo
+        
+        if tipo == TipoTopico.OUTRO or tipo is None:
+            if "relatorio" in titulo or "relatório" in titulo:
+                tipo = TipoTopico.RELATORIO
+            elif "dispositivo" in titulo:
+                tipo = TipoTopico.DISPOSITIVO
+            elif topico.questao_id:
+                if "preliminar" in titulo or "pressuposto" in titulo:
+                    tipo = TipoTopico.PRELIMINAR
+                else:
+                    tipo = TipoTopico.MERITO_QUESTAO
+            elif titulo in {"merito", "mérito"}:
+                # Seção genérica sem questão: trata como outro (não injeta dossiê).
+                tipo = TipoTopico.OUTRO
+            else:
+                tipo = TipoTopico.OUTRO
+        
+        if tipo in (TipoTopico.RELATORIO, TipoTopico.DISPOSITIVO):
+            topico.questao_id = None
+        elif tipo in (TipoTopico.MERITO_QUESTAO, TipoTopico.PRELIMINAR) and not topico.questao_id:
+            # Mantém; o aviso virá na geração se não achar dossiê por título.
+            pass
+        
+        topico.tipo = tipo
+        return topico
+    
+    def _obter_dossie_questao(
+        self,
+        topico: TopicoEstrutura,
+        dossie: DossieProva
+    ) -> Optional[DossieQuestao]:
+        """Localiza o dossiê da questão pelo ID; se falhar, tenta pelo título."""
+        if topico.tipo in (TipoTopico.RELATORIO, TipoTopico.DISPOSITIVO):
+            return None
+        
+        if topico.questao_id:
+            for dq in dossie.dossies_por_questao:
+                if dq.questao_id == topico.questao_id:
+                    return dq
+        
+        if topico.tipo not in (TipoTopico.MERITO_QUESTAO, TipoTopico.PRELIMINAR, TipoTopico.OUTRO):
+            return None
+        
+        titulo_norm = self._normalizar_texto(topico.titulo)
+        if not titulo_norm:
+            return None
+        
+        for dq in dossie.dossies_por_questao:
+            titulo_dq = self._normalizar_texto(dq.questao_titulo)
+            if titulo_norm == titulo_dq or titulo_norm in titulo_dq or titulo_dq in titulo_norm:
+                return dq
+        
+        return None
+    
+    @staticmethod
+    def _normalizar_texto(texto: str) -> str:
+        """Normaliza texto para comparação tolerante de títulos."""
+        return re.sub(r"\s+", " ", (texto or "").strip().lower())
+    
+    def _formatar_prova_linha(self, prova: Any, prefixo: str = "", limite: int = 800) -> str:
+        """Formata uma prova com trecho, ID e folhas para o prompt."""
+        trecho = (prova.trecho or "").strip()
+        if len(trecho) > limite:
+            trecho = trecho[:limite].rstrip() + "..."
+        
+        partes_meta = []
+        id_pje = normalizar_id_pje(getattr(prova, "id_pje", None))
+        if id_pje:
+            partes_meta.append(f"ID {id_pje}")
+        folhas = getattr(prova, "folhas", None)
+        if folhas:
+            partes_meta.append(str(folhas))
+        meta = f" ({', '.join(partes_meta)})" if partes_meta else ""
+        
+        if prefixo:
+            return f"\n- [{prefixo}] {trecho}{meta}"
+        return f"\n- {trecho}{meta}"
+    
+    def _formatar_bloco_provas(self, dossie_questao: DossieQuestao) -> str:
+        """Monta o bloco de provas documentais, periciais e orais para o prompt."""
+        linhas = []
+        
+        documentais = dossie_questao.provas_documentais[:10]
+        linhas.append("PROVAS DOCUMENTAIS:")
+        if documentais:
+            for p in documentais:
+                tipo = getattr(p, "tipo_documento", None) or "documento"
+                linhas.append(self._formatar_prova_linha(p, prefixo=tipo, limite=600))
+        else:
+            linhas.append("\n(nenhuma prova documental neste dossiê)")
+        
+        periciais = dossie_questao.provas_periciais[:10]
+        linhas.append("\n\nPROVAS PERICIAIS:")
+        if periciais:
+            for p in periciais:
+                tipo = getattr(p, "tipo_laudo", None) or "laudo"
+                # Laudos costumam ser o eixo da fundamentação: trechos mais longos.
+                linhas.append(self._formatar_prova_linha(p, prefixo=tipo, limite=1200))
+        else:
+            linhas.append("\n(nenhuma prova pericial neste dossiê)")
+        
+        orais = [p for p in dossie_questao.provas_orais[:10] if not p.desconsiderada]
+        linhas.append("\n\nPROVAS ORAIS:")
+        if orais:
+            for p in orais:
+                prefixo = p.tipo_depoente
+                if p.nome_depoente:
+                    prefixo = f"{p.tipo_depoente} — {p.nome_depoente}"
+                linhas.append(self._formatar_prova_linha(p, prefixo=prefixo, limite=600))
+        else:
+            linhas.append("\n(nenhuma prova oral utilizável neste dossiê)")
+        
+        return "".join(linhas) + "\n"
+    
+    def _resumo_cartao_para_relatorio(self, cartao: CartaoDoCaso) -> str:
+        """Contexto narrativo para o tópico Relatório."""
+        partes = ", ".join(f"{p.tipo}: {p.nome}" for p in (cartao.partes or []))
+        questoes = "\n".join(
+            f"- {q.id}: {q.titulo}"
+            for q in cartao.questoes
+            if q.mencionar_na_minuta
+        )
+        return f"""PARTES: {partes or '(não informadas)'}
+NÚMERO DO PROCESSO: {cartao.numero_processo or '(não informado)'}
+QUESTÕES A MENCIONAR NO RELATÓRIO:
+{questoes or '(nenhuma)'}
+"""
+    
     def _construir_prompt_previa(
         self,
         topico: TopicoEstrutura,
         cartao: CartaoDoCaso,
-        dossie_questao: Optional[DossieQuestao]
+        dossie_questao: Optional[DossieQuestao],
+        dossie: Optional[DossieProva] = None,
     ) -> str:
-        """Constrói prompt para minuta prévia."""
+        """Constrói prompt para minuta prévia conforme o papel do tópico."""
+        if topico.tipo == TipoTopico.RELATORIO:
+            return f"""Gere a minuta prévia do RELATÓRIO da sentença (apenas planejamento narrativo).
+
+{self._resumo_cartao_para_relatorio(cartao)}
+
+FORMATO JSON:
+{{
+  "tese": "síntese da pretensão autoral",
+  "antitese": "síntese da defesa",
+  "abordagem": "como narrar o relatório (partes, pedidos, defesa, provas produzidas)",
+  "conclusao_preliminar": "o relatório deve permanecer narrativo, sem julgar o mérito"
+}}
+
+Retorne JSON válido."""
+        
+        if topico.tipo == TipoTopico.DISPOSITIVO:
+            questoes = "\n".join(
+                f"- {q.id}: {q.titulo}"
+                for q in cartao.questoes
+                if q.mencionar_na_minuta
+            )
+            return f"""Gere a minuta prévia do DISPOSITIVO final da sentença.
+
+QUESTÕES CUJOS COMANDOS DEVEM SER ESPELHADOS:
+{questoes}
+
+FORMATO JSON:
+{{
+  "tese": "n/a",
+  "antitese": "n/a",
+  "abordagem": "como espelhar os comandos decisórios, custas e encargos",
+  "conclusao_preliminar": "dispositivo consolida os comandos das questões de mérito já planejadas"
+}}
+
+Retorne JSON válido."""
+        
         questao = None
         if topico.questao_id:
             for q in cartao.questoes:
@@ -337,7 +577,7 @@ Retorne JSON válido."""
                     questao = q
                     break
         
-        prompt = f"""Gere a minuta prévia para o tópico: {topico.titulo}
+        prompt = f"""Gere a minuta prévia para o tópico de mérito: {topico.titulo}
 
 """
         
@@ -349,18 +589,23 @@ Momento: {questao.momento}
 """
         
         if dossie_questao:
-            prompt += f"""PROVAS DISPONÍVEIS:
+            prompt += f"""RESUMO DAS PROVAS:
 - {len(dossie_questao.provas_documentais)} documentais
 - {len(dossie_questao.provas_periciais)} periciais
 - {len(dossie_questao.provas_orais)} orais
+
+{self._formatar_bloco_provas(dossie_questao)}
+"""
+        elif topico.tipo in (TipoTopico.MERITO_QUESTAO, TipoTopico.PRELIMINAR):
+            prompt += """ORIENTAÇÃO INTERNA (não reproduzir na minuta): não há dossiê vinculado a esta questão; planeje a abordagem só com o cartão, sem inventar provas.
 
 """
         
         prompt += """FORMATO JSON:
 {
-  "tese": "tese do autor resumidamente",
-  "antitese": "antítese da defesa resumidamente",
-  "abordagem": "como pretende abordar a questão",
+  "tese": "tese do autor com densidade adequada",
+  "antitese": "antítese da defesa com densidade adequada",
+  "abordagem": "plano dialético: prova a valorar, direito aplicável, refutações",
   "conclusao_preliminar": "conclusão preliminar"
 }
 
@@ -374,11 +619,53 @@ Retorne JSON válido."""
         minuta_previa: MinutaTopico,
         cartao: CartaoDoCaso,
         dossie_questao: Optional[DossieQuestao],
+        dossie: DossieProva,
         precedentes: List[Precedente],
         modelos_tema: List[str]
     ) -> str:
-        """Constrói prompt para minuta definitiva."""
-        prompt = f"""Redija a minuta definitiva do tópico: {topico.titulo}
+        """Constrói prompt para minuta definitiva conforme o papel do tópico."""
+        if topico.tipo == TipoTopico.RELATORIO:
+            return f"""Redija APENAS o RELATÓRIO da sentença trabalhista em MARKDOWN.
+
+ABORDAGEM APROVADA:
+{minuta_previa.abordagem}
+
+{self._resumo_cartao_para_relatorio(cartao)}
+
+REGRAS:
+- Linguagem forense habitual de relatório judicial
+- Narrativa contínua (sem subtítulos I/II/III de Fundamentação/Dispositivo)
+- NÃO julgue o mérito, NÃO escreva fundamentação nem dispositivo
+- NÃO mencione ausência de dossiê nem instruções internas
+- Não invente IDs; cite folhas ou IDs só se estiverem no material acima
+"""
+        
+        if topico.tipo == TipoTopico.DISPOSITIVO:
+            questoes = "\n".join(
+                f"- {q.id}: {q.titulo}"
+                for q in cartao.questoes
+                if q.mencionar_na_minuta
+            )
+            return f"""Redija APENAS o DISPOSITIVO final da sentença trabalhista em MARKDOWN.
+
+ABORDAGEM APROVADA:
+{minuta_previa.abordagem}
+
+CONCLUSÃO PRELIMINAR:
+{minuta_previa.conclusao_preliminar}
+
+QUESTÕES A ESPELHAR:
+{questoes}
+
+REGRAS:
+- Espelhe os comandos decisórios em voz passiva pronominal / terceira pessoa
+- Inclua custas, recolhimentos e honorários quando cabível
+- NÃO repita relatório nem fundamentação
+- NÃO use placeholders do tipo "[a definir]" ou "conforme diretrizes do juízo"
+- NÃO mencione ausência de dossiê
+"""
+        
+        prompt = f"""Redija a FUNDAMENTAÇÃO dialética do tópico: {topico.titulo}
 
 ABORDAGEM APROVADA:
 {minuta_previa.abordagem}
@@ -389,35 +676,34 @@ CONCLUSÃO PRELIMINAR:
 """
         
         if dossie_questao:
-            prompt += """PROVAS DOCUMENTAIS:
-"""
-            for p in dossie_questao.provas_documentais[:5]:
-                prompt += f"\n- {p.trecho[:200]}... (ID {p.id_pje}, {p.folhas})"
-            
-            prompt += """\n\nPROVAS ORAIS:
-"""
-            for p in dossie_questao.provas_orais[:5]:
-                if not p.desconsiderada:
-                    prompt += f"\n- [{p.tipo_depoente}] {p.trecho[:200]}..."
+            prompt += self._formatar_bloco_provas(dossie_questao)
+        else:
+            prompt += (
+                "ORIENTAÇÃO INTERNA (não reproduzir na minuta): "
+                "não há dossiê vinculado; fundamente só com o cartão/abordagem, "
+                "sem inventar IDs, folhas ou trechos de prova.\n\n"
+            )
         
         if precedentes:
-            prompt += """\n\nPRECEDENTES RELEVANTES:
-"""
+            prompt += "\nPRECEDENTES RELEVANTES:\n"
             for p in precedentes[:3]:
                 prompt += f"\n- {p.processo_numero}: {p.ementa[:200]}..."
         
         if modelos_tema:
-            prompt += """\n\nMODELOS TEMÁTICOS DISPONÍVEIS:
-"""
+            prompt += "\n\nMODELOS TEMÁTICOS DISPONÍVEIS:\n"
             for modelo in modelos_tema:
                 prompt += f"\n{modelo}\n"
         
-        prompt += """\n---
+        prompt += """
+---
 
-Redija a minuta em MARKDOWN, seguindo o kernel Sarah.
-Cite IDs e folhas quando referenciar provas.
-Se usar precedentes, cite o número do processo.
-Transcreva literalmente trechos de prova relevantes.
+REGRAS DE REDAÇÃO DESTE TÓPICO:
+- Escreva SOMENTE a fundamentação desta questão (não reinicie Relatório nem Dispositivo completo)
+- Densidade de decisão judicial: desenvolva alegações das partes, valoração da prova e subsunção
+- Transcreva literalmente trechos de prova relevantes
+- Cite ID e folhas apenas quando constarem do material; se faltar ID, cite só as folhas
+- NÃO escreva "ID não informado" nem "Não há dossiê de provas vinculado a este tópico"
+- Markdown forense, sem metalinguagem
 """
         
         return prompt
@@ -466,17 +752,8 @@ Transcreva literalmente trechos de prova relevantes.
         return modelos_texto
     
     def _extrair_ids_citados(self, texto: str) -> List[str]:
-        """Extrai IDs do PJe citados na minuta."""
-        pattern = r'\(ID\s+\d+[,\s]+fls\.\s*\d+\)'
-        matches = re.findall(pattern, texto)
-        
-        ids = []
-        for match in matches:
-            id_match = re.search(r'ID\s+(\d+)', match)
-            if id_match:
-                ids.append(id_match.group(1))
-        
-        return list(set(ids))
+        """Extrai IDs do PJe citados na minuta (numéricos ou alfanuméricos)."""
+        return extrair_ids_pje_do_texto(texto)
     
     def _coletar_ids_disponiveis(
         self,
@@ -512,14 +789,20 @@ Transcreva literalmente trechos de prova relevantes.
     ) -> tuple[bool, List[str]]:
         """Valida IDs citados."""
         ids_invalidos = []
+        disponiveis = [
+            (normalizar_id_pje(i) or i or "").lower()
+            for i in ids_disponiveis
+            if i
+        ]
         
         for id_citado in ids_citados:
-            encontrado = False
-            for id_disp in ids_disponiveis:
-                if id_citado in id_disp or id_disp in id_citado:
-                    encontrado = True
-                    break
-            
+            citado = (normalizar_id_pje(id_citado) or id_citado or "").lower()
+            if not citado:
+                continue
+            encontrado = any(
+                citado in disp or disp in citado
+                for disp in disponiveis
+            )
             if not encontrado:
                 ids_invalidos.append(id_citado)
         

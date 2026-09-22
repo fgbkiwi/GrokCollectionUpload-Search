@@ -135,7 +135,24 @@ class XAICollectionsClient:
         )
         
         data = response.json()
-        return data.get("collections", [])
+        brutas = data.get("collections") or data.get("data") or []
+        return [self._normalizar_collection(c) for c in brutas if isinstance(c, dict)]
+
+    @staticmethod
+    def _normalizar_collection(collection: Dict) -> Dict:
+        """Unifica collection_id/collection_name com aliases id/name."""
+        normalizada = dict(collection)
+        collection_id = collection.get("id") or collection.get("collection_id")
+        collection_name = (
+            collection.get("name")
+            or collection.get("collection_name")
+            or collection_id
+        )
+        if collection_id:
+            normalizada["id"] = collection_id
+        if collection_name:
+            normalizada["name"] = collection_name
+        return normalizada
     
     def obter_collection(self, collection_id: str) -> Dict:
         """

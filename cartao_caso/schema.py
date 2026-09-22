@@ -2,8 +2,8 @@
 Schema JSON do Cartão do Caso usando Pydantic para validação.
 """
 
-from typing import List, Optional, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Literal, Any
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from datetime import datetime
 
 
@@ -161,6 +161,35 @@ class CartaoDoCaso(BaseModel):
         default_factory=list,
         description="Avisos sobre a extração"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalizar_nulos_da_llm(cls, data: Any) -> Any:
+        """Converte null explícito da LLM em defaults (default_factory não cobre null)."""
+        if not isinstance(data, dict):
+            return data
+
+        if data.get("peticao_inicial") is None:
+            data["peticao_inicial"] = {"causa_pedir": None, "pedidos": []}
+        elif isinstance(data.get("peticao_inicial"), dict):
+            pet = data["peticao_inicial"]
+            if pet.get("pedidos") is None:
+                pet["pedidos"] = []
+
+        if data.get("replica") is None:
+            data["replica"] = {"existe": False, "pontos_principais": [], "fontes": []}
+
+        for campo_lista in (
+            "partes",
+            "contestacoes",
+            "questoes",
+            "mapa_pedido_defesa_questao",
+            "avisos",
+        ):
+            if data.get(campo_lista) is None:
+                data[campo_lista] = []
+
+        return data
     
     model_config = ConfigDict(
         json_schema_extra={

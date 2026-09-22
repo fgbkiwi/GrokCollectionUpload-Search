@@ -1,8 +1,8 @@
 # Requirements para PrecedenteSearchApp.py
 # Aplicação Flet para busca de precedentes usando xAI Collections
 
-# Framework de UI
-flet>=0.20.0
+# Framework de UI (0.25–0.28; evitar Flet 0.70+/V1 com ft.run)
+flet>=0.25.0,<0.70
 
 # HTTP requests para xAI API
 requests>=2.31.0
@@ -12,6 +12,3 @@ pyperclip>=1.8.2
 
 # Instalação:
 # pip install -r requirements_app.txt
-
-# Ou instale individualmente:
-# pip install flet requests pyperclip

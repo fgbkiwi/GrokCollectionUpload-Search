@@ -34,8 +34,9 @@ class ConfigManager:
         self.default_config = {
             "management_key": "",
             "api_key": "",
-            "model": "grok-2-1212",
+            "model": "grok-4.6",
             "temperature": 0.7,
+            "reasoning_effort": "high",
             "system_prompt": "Você é um assistente jurídico especializado em Direito do Trabalho brasileiro. Analise precedentes e fundamente respostas com base na CLT, jurisprudência e doutrina trabalhista.",
             "realtime_web_search": False,
             "realtime_x_search": False,
@@ -98,13 +99,26 @@ class XAIClient:
                 "Content-Type": "application/json"
             }
             response = requests.get(
-                f"{self.base_url}/collections",
+                "https://management-api.x.ai/v1/collections",
                 headers=headers,
-                timeout=10
+                timeout=30
             )
             response.raise_for_status()
             data = response.json()
-            return data.get("collections", [])
+            brutas = data.get("collections") or data.get("data") or []
+            normalizadas = []
+            for col in brutas:
+                if not isinstance(col, dict):
+                    continue
+                cid = col.get("id") or col.get("collection_id")
+                name = col.get("name") or col.get("collection_name") or cid
+                item = dict(col)
+                if cid:
+                    item["id"] = cid
+                if name:
+                    item["name"] = name
+                normalizadas.append(item)
+            return normalizadas
         except Exception as e:
             print(f"Erro ao listar collections: {e}")
             return []
@@ -115,7 +129,8 @@ class XAIClient:
         model: str,
         temperature: float,
         tools: Optional[List[Dict]] = None,
-        stream: bool = False
+        stream: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> Any:
         """
         Envia requisição de chat completion para a API.
@@ -126,10 +141,13 @@ class XAIClient:
             temperature: Temperatura para geração
             tools: Lista de ferramentas disponíveis
             stream: Se deve usar streaming
+            reasoning_effort: Nível de reasoning quando o modelo permitir
             
         Returns:
             Resposta da API
         """
+        from xai_reasoning import aplicar_reasoning_effort
+
         payload = {
             "model": model,
             "messages": messages,
@@ -141,6 +159,8 @@ class XAIClient:
         
         if stream:
             payload["stream"] = True
+
+        aplicar_reasoning_effort(payload, model, reasoning_effort)
         
         try:
             response = requests.post(
@@ -174,6 +194,9 @@ class PrecedenteSearchApp:
         self.page.title = "Busca de Precedentes Trabalhistas"
         self.page.theme_mode = ft.ThemeMode.DARK if self.config_manager.get("theme_dark") else ft.ThemeMode.LIGHT
         self.page.padding = 0
+
+        self.file_picker = ft.FilePicker(on_result=self._on_file_selected)
+        self.page.overlay.append(self.file_picker)
         
         # Inicializa cliente xAI
         self.update_xai_client()
@@ -193,22 +216,22 @@ class PrecedenteSearchApp:
         # Barra de ferramentas
         toolbar_controls: List[Any] = [
             ft.IconButton(
-                icon="delete_sweep", # type: ignore
+                icon=ft.Icons.DELETE_SWEEP,
                 tooltip="Limpar chat",
                 on_click=self.clear_chat
             ),
             ft.IconButton(
-                icon="copy_all", # type: ignore
+                icon=ft.Icons.COPY_ALL,
                 tooltip="Copiar chat",
                 on_click=self.copy_chat
             ),
             ft.IconButton(
-                icon="attach_file", # type: ignore
+                icon=ft.Icons.ATTACH_FILE,
                 tooltip="Anexar arquivo",
                 on_click=self.attach_file
             ),
             ft.IconButton(
-                icon="settings", # type: ignore
+                icon=ft.Icons.SETTINGS,
                 tooltip="Configurações",
                 on_click=self.open_settings
             ),
@@ -254,8 +277,8 @@ class PrecedenteSearchApp:
         
         # Botão de enviar
         self.send_button = ft.ElevatedButton(
-            text="Enviar", # type: ignore
-            icon="send", # type: ignore
+            text="Enviar",
+            icon=ft.Icons.SEND,
             on_click=self.send_message,
         )
         
@@ -282,7 +305,7 @@ class PrecedenteSearchApp:
             controls=[
                 ft.Container(
                     content=self.toolbar,
-                    bgcolor="surfacevariant",
+                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                     padding=10,
                 ),
                 self.chat_container,
@@ -353,7 +376,7 @@ class PrecedenteSearchApp:
         """
         row_controls: List[Any] = [
             ft.Icon(
-                "person" if is_user else "smart_toy", # type: ignore
+                ft.Icons.PERSON if is_user else ft.Icons.SMART_TOY,
                 size=20,
             ),
             ft.Text(
@@ -364,7 +387,7 @@ class PrecedenteSearchApp:
             ft.Text(
                 datetime.now().strftime("%H:%M"),
                 size=12,
-                color="grey",
+                color=ft.Colors.GREY,
             ),
         ]
         message_card = ft.Card(
@@ -395,7 +418,7 @@ class PrecedenteSearchApp:
                     extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
                 ),
                 padding=15,
-                bgcolor="bluegrey900" if self.config_manager.get("theme_dark") else "bluegrey100",
+                bgcolor=ft.Colors.BLUE_GREY_900 if self.config_manager.get("theme_dark") else ft.Colors.BLUE_GREY_100,
             ),
             elevation=1,
         )
@@ -427,20 +450,14 @@ class PrecedenteSearchApp:
     
     def attach_file(self, e):
         """Abre diálogo para anexar arquivo."""
-        def on_file_selected(e: Any):
-            if e.files:
-                for file in e.files:
-                    self.attached_files.append(file.path)
-                    self.add_system_message(f"📎 Arquivo anexado: {file.name}")
-        
-        file_picker = ft.FilePicker(on_result=on_file_selected) # type: ignore
-        self.page.overlay.append(file_picker)
-        self.page.update()
-        # Em algumas versões do Flet, pick_files é síncrono ou disparado via evento
-        try:
-            file_picker.pick_files(allow_multiple=True) # type: ignore
-        except Exception:
-            pass
+        self.file_picker.pick_files(allow_multiple=True)
+
+    def _on_file_selected(self, e: ft.FilePickerResultEvent):
+        """Callback do FilePicker."""
+        if e.files:
+            for file in e.files:
+                self.attached_files.append(file.path)
+                self.add_system_message(f"📎 Arquivo anexado: {file.name}")
     
     def build_tools(self) -> Optional[List[Dict]]:
         """
@@ -548,7 +565,8 @@ class PrecedenteSearchApp:
                 model=self.config_manager.get("model"),
                 temperature=self.config_manager.get("temperature"),
                 tools=tools,
-                stream=False
+                stream=False,
+                reasoning_effort=self.config_manager.get("reasoning_effort"),
             )
             
             # Processa resposta
@@ -572,6 +590,14 @@ class PrecedenteSearchApp:
     
     def open_settings(self, e):
         """Abre diálogo de configurações."""
+        from xai_reasoning import (
+            LABELS_REASONING,
+            DEFAULT_REASONING_EFFORT,
+            modelo_suporta_reasoning,
+            niveis_reasoning_para_modelo,
+            normalizar_reasoning_effort,
+        )
+
         # Campos de configuração
         management_key_field = ft.TextField(
             label="Management Key (xAI Collections)",
@@ -593,12 +619,50 @@ class PrecedenteSearchApp:
             label="Modelo",
             value=self.config_manager.get("model"),
             options=[
-                ft.dropdown.Option("grok-2-1212", "Grok 2 (Dezembro 2024)"),
-                ft.dropdown.Option("grok-2-vision-1212", "Grok 2 Vision"),
-                ft.dropdown.Option("grok-beta", "Grok Beta"),
+                ft.dropdown.Option("grok-4.6", "Grok 4.6 (Recomendado)"),
+                ft.dropdown.Option("grok-4.5", "Grok 4.5"),
+                ft.dropdown.Option("grok-4.3", "Grok 4.3"),
+                ft.dropdown.Option("grok-4.20-0309-non-reasoning", "Grok 4.20 Non-Reasoning"),
             ],
             width=500,
         )
+
+        reasoning_dropdown = ft.Dropdown(
+            label="Nível de reasoning",
+            width=500,
+        )
+        reasoning_hint = ft.Text(size=12, color=ft.Colors.GREY_700)
+
+        def sync_reasoning_options(_e=None):
+            modelo = model_dropdown.value or "grok-4.6"
+            niveis = niveis_reasoning_para_modelo(modelo)
+            if not niveis:
+                reasoning_dropdown.options = [
+                    ft.dropdown.Option("", "Não disponível para este modelo")
+                ]
+                reasoning_dropdown.value = ""
+                reasoning_dropdown.disabled = True
+                reasoning_hint.value = "Este modelo não aceita o parâmetro reasoning_effort."
+            else:
+                reasoning_dropdown.disabled = False
+                reasoning_dropdown.options = [
+                    ft.dropdown.Option(nivel, LABELS_REASONING.get(nivel, nivel))
+                    for nivel in niveis
+                ]
+                reasoning_dropdown.value = normalizar_reasoning_effort(
+                    modelo,
+                    self.config_manager.get("reasoning_effort") or DEFAULT_REASONING_EFFORT,
+                )
+                reasoning_hint.value = (
+                    "Controla a profundidade de raciocínio (latência × qualidade)."
+                )
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        model_dropdown.on_change = sync_reasoning_options
+        sync_reasoning_options()
         
         temperature_slider = ft.Slider(
             min=0,
@@ -643,6 +707,13 @@ class PrecedenteSearchApp:
             self.config_manager.set("management_key", management_key_field.value)
             self.config_manager.set("api_key", api_key_field.value)
             self.config_manager.set("model", model_dropdown.value)
+            modelo = model_dropdown.value or "grok-4.6"
+            if modelo_suporta_reasoning(modelo):
+                self.config_manager.set(
+                    "reasoning_effort",
+                    normalizar_reasoning_effort(modelo, reasoning_dropdown.value)
+                    or DEFAULT_REASONING_EFFORT,
+                )
             self.config_manager.set("temperature", temperature_slider.value)
             self.config_manager.set("system_prompt", system_prompt_field.value)
             self.config_manager.set("realtime_web_search", realtime_web_toggle.value)
@@ -659,8 +730,7 @@ class PrecedenteSearchApp:
             # Atualiza collections
             self.refresh_collections()
             
-            settings_dialog.open = False
-            self.page.update()
+            self.close_dialog(settings_dialog)
             self.add_system_message("✅ Configurações salvas!")
         
         # Diálogo de configurações
@@ -671,6 +741,8 @@ class PrecedenteSearchApp:
                     management_key_field,
                     api_key_field,
                     model_dropdown,
+                    reasoning_dropdown,
+                    reasoning_hint,
                     ft.Row([ft.Text("Temperature:"), temperature_slider]),
                     system_prompt_field,
                     ft.Divider(),

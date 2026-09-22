@@ -3,16 +3,23 @@ Examinador de Provas Periciais.
 """
 
 import json
-from typing import List
+from typing import List, Optional
 from .schema import ProvaPericial
+from xai_reasoning import aplicar_reasoning_effort
 
 
 class ExaminadorPericial:
     """Examina provas periciais dos autos (laudos)."""
     
-    def __init__(self, api_key: str, modelo: str = "grok-beta"):
+    def __init__(
+        self,
+        api_key: str,
+        modelo: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
+    ):
         self.api_key = api_key
         self.modelo = modelo
+        self.reasoning_effort = reasoning_effort
         self.base_url = "https://api.x.ai/v1"
     
     def examinar(
@@ -59,6 +66,7 @@ class ExaminadorPericial:
             "temperature": 0.1,
             "response_format": {"type": "json_object"}
         }
+        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
         
         try:
             response = requests.post(
@@ -82,6 +90,11 @@ class ExaminadorPericial:
                     avisos = dados.get("avisos", [])
                     avisos.append(f"Erro ao validar prova pericial: {e}")
             
+            from pje_ids import enriquecer_id_em_objetos, normalizar_id_pje
+            for prova in provas:
+                prova.id_pje = normalizar_id_pje(prova.id_pje)
+            enriquecer_id_em_objetos(provas, conteudo_pericial)
+            
             avisos = dados.get("avisos", [])
             return provas, avisos
             
@@ -99,7 +112,7 @@ REGRAS DE VALORAÇÃO PERICIAL:
 2. Conclusões do perito têm presunção de veracidade
 3. Impugnação ao laudo requer contra-prova técnica consistente
 4. NUNCA invente ID do PJe, número de folhas, conclusões ou dados técnicos que não estejam no laudo
-5. Se não houver ID ou folhas, deixe null e avise
+5. ID do PJe: string alfanumérica de 7 caracteres (ex.: b9283dd), tipicamente no final da linha de assinatura eletrônica do PJe. Se não houver, null (não escreva "não informado")
 6. Transcreva literalmente trechos relevantes do laudo
 
 FORMATO DE SAÍDA (JSON):
@@ -107,7 +120,7 @@ FORMATO DE SAÍDA (JSON):
   "provas_periciais": [
     {
       "trecho": "texto literal do laudo",
-      "id_pje": "ID xxxxx" ou null,
+      "id_pje": "b9283dd" ou null,
       "folhas": "fls. XX" ou null,
       "relevancia": "alta|media|baixa",
       "favoravel_a": "autor|reu|neutro",

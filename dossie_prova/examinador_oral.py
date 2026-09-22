@@ -6,16 +6,23 @@ metodologia do juiz.
 """
 
 import json
-from typing import List
+from typing import List, Optional
 from .schema import ProvaOral
+from xai_reasoning import aplicar_reasoning_effort
 
 
 class ExaminadorOral:
     """Examina provas orais dos autos (depoimentos)."""
     
-    def __init__(self, api_key: str, modelo: str = "grok-beta"):
+    def __init__(
+        self,
+        api_key: str,
+        modelo: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
+    ):
         self.api_key = api_key
         self.modelo = modelo
+        self.reasoning_effort = reasoning_effort
         self.base_url = "https://api.x.ai/v1"
     
     def examinar(
@@ -62,6 +69,7 @@ class ExaminadorOral:
             "temperature": 0.1,
             "response_format": {"type": "json_object"}
         }
+        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
         
         try:
             response = requests.post(
@@ -84,6 +92,11 @@ class ExaminadorOral:
                 except Exception as e:
                     avisos = dados.get("avisos", [])
                     avisos.append(f"Erro ao validar prova oral: {e}")
+            
+            from pje_ids import enriquecer_id_em_objetos, normalizar_id_pje
+            for prova in provas:
+                prova.id_pje = normalizar_id_pje(prova.id_pje)
+            enriquecer_id_em_objetos(provas, conteudo_oral)
             
             avisos = dados.get("avisos", [])
             return provas, avisos
@@ -139,7 +152,7 @@ FORMATO DE SAÍDA (JSON):
   "provas_orais": [
     {
       "trecho": "texto literal com [timestamp] se existir",
-      "id_pje": "ID xxxxx" ou null,
+      "id_pje": "c7dbfbc" ou null,
       "folhas": "fls. XX" ou null,
       "relevancia": "alta|media|baixa",
       "favoravel_a": "autor|reu|neutro",

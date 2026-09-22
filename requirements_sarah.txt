@@ -1,4 +1,6 @@
-flet>=0.25.0
+# Flet 0.25–0.28: ft.app, ft.Icons/Colors, page.open/close, page.window.*
+# Evitar 0.70+ (API V1: ft.run, FilePicker como service, etc.)
+flet>=0.25.0,<0.70
 pydantic>=2.0.0
 requests>=2.31.0
 pytest>=7.4.0

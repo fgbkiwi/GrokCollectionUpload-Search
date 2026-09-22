@@ -17,6 +17,15 @@ class TipoPrecedente(str, Enum):
     OUTRO = "outro"
 
 
+class TipoTopico(str, Enum):
+    """Papel do tópico na orquestração da minuta."""
+    RELATORIO = "relatorio"
+    PRELIMINAR = "preliminar"
+    MERITO_QUESTAO = "merito_questao"
+    DISPOSITIVO = "dispositivo"
+    OUTRO = "outro"
+
+
 class Precedente(BaseModel):
     """Precedente recuperado da Collection."""
     processo_numero: Optional[str] = Field(None, description="Número do processo")
@@ -33,6 +42,10 @@ class TopicoEstrutura(BaseModel):
     nivel: int = Field(..., description="Nível hierárquico (1, 2, 3...)")
     ordem: int = Field(..., description="Ordem de apresentação")
     questao_id: Optional[str] = Field(None, description="ID da questão relacionada se aplicável")
+    tipo: TipoTopico = Field(
+        TipoTopico.OUTRO,
+        description="Papel do tópico: relatorio | preliminar | merito_questao | dispositivo | outro",
+    )
 
 
 class MinutaTopico(BaseModel):

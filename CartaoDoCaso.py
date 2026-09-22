@@ -28,17 +28,22 @@ class CartaoDoCasoApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.page.title = "Cartão do Caso - Extração Estruturada de Autos"
-        self.page.window_width = 1400
-        self.page.window_height = 900
+        self.page.window.width = 1400
+        self.page.window.height = 900
         self.page.theme_mode = ft.ThemeMode.LIGHT
         
         self.api_key = ""
-        self.modelo_grok = "grok-beta"
+        self.modelo_grok = "grok-4.6"
+        self.reasoning_effort = "high"
         self.caminho_arquivo: Optional[Path] = None
         self.cartao_atual: Optional[CartaoDoCaso] = None
         
         self.extrator: Optional[ExtratorCartao] = None
         self.persistencia = PersistenciaCartao()
+
+        self.file_picker = ft.FilePicker(on_result=self._on_arquivo_selecionado)
+        self.save_picker = ft.FilePicker(on_result=self._on_exportar_selecionado)
+        self.page.overlay.extend([self.file_picker, self.save_picker])
         
         self._construir_ui()
     
@@ -57,35 +62,43 @@ class CartaoDoCasoApp:
             label="Modelo Grok",
             width=300,
             options=[
-                ft.dropdown.Option("grok-beta", "grok-beta (Recomendado)"),
-                ft.dropdown.Option("grok-2-1212", "grok-2-1212"),
-                ft.dropdown.Option("grok-4.6", "grok-4.6"),
+                ft.dropdown.Option("grok-4.6", "grok-4.6 (Recomendado)"),
+                ft.dropdown.Option("grok-4.5", "grok-4.5"),
+                ft.dropdown.Option("grok-4.3", "grok-4.3"),
+                ft.dropdown.Option("grok-4.20-0309-non-reasoning", "grok-4.20 non-reasoning"),
             ],
-            value="grok-beta",
+            value="grok-4.6",
             on_change=self._atualizar_modelo
         )
+
+        self.dropdown_reasoning = ft.Dropdown(
+            label="Nível de reasoning",
+            width=300,
+            on_change=self._atualizar_reasoning,
+        )
+        self._sincronizar_dropdown_reasoning()
         
         self.campo_arquivo = ft.Text(
             "Nenhum arquivo selecionado",
             size=14,
-            color=ft.colors.GREY_700
+            color=ft.Colors.GREY_700
         )
         
         self.btn_selecionar = ft.ElevatedButton(
             "Escolher Arquivo/Pasta MD",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_arquivo
         )
         
         self.btn_extrair = ft.ElevatedButton(
             "Extrair Cartão",
-            icon=ft.icons.PLAY_ARROW,
+            icon=ft.Icons.PLAY_ARROW,
             on_click=self._extrair_cartao,
             disabled=True
         )
         
         self.progresso = ft.ProgressBar(visible=False, width=600)
-        self.texto_progresso = ft.Text("", size=12, color=ft.colors.BLUE)
+        self.texto_progresso = ft.Text("", size=12, color=ft.Colors.BLUE)
         
         self.abas = ft.Tabs(
             selected_index=0,
@@ -93,22 +106,22 @@ class CartaoDoCasoApp:
             tabs=[
                 ft.Tab(
                     text="Pedidos",
-                    icon=ft.icons.LIST_ALT,
+                    icon=ft.Icons.LIST_ALT,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="Questões",
-                    icon=ft.icons.QUESTION_ANSWER,
+                    icon=ft.Icons.QUESTION_ANSWER,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="Avisos",
-                    icon=ft.icons.WARNING,
+                    icon=ft.Icons.WARNING,
                     content=ft.Container(padding=10)
                 ),
                 ft.Tab(
                     text="JSON",
-                    icon=ft.icons.CODE,
+                    icon=ft.Icons.CODE,
                     content=ft.Container(padding=10)
                 ),
             ],
@@ -117,23 +130,23 @@ class CartaoDoCasoApp:
         
         self.btn_confirmar = ft.ElevatedButton(
             "Confirmar Cartão",
-            icon=ft.icons.CHECK_CIRCLE,
+            icon=ft.Icons.CHECK_CIRCLE,
             on_click=self._confirmar_cartao,
             disabled=True,
-            bgcolor=ft.colors.GREEN,
-            color=ft.colors.WHITE
+            bgcolor=ft.Colors.GREEN,
+            color=ft.Colors.WHITE
         )
         
         self.btn_voltar = ft.ElevatedButton(
             "Voltar a Extrair",
-            icon=ft.icons.REFRESH,
+            icon=ft.Icons.REFRESH,
             on_click=self._voltar_extrair,
             disabled=True
         )
         
         self.btn_exportar = ft.ElevatedButton(
             "Exportar JSON",
-            icon=ft.icons.DOWNLOAD,
+            icon=ft.Icons.DOWNLOAD,
             on_click=self._exportar_json,
             disabled=True
         )
@@ -144,23 +157,23 @@ class CartaoDoCasoApp:
                     "Cartão do Caso",
                     size=28,
                     weight=ft.FontWeight.BOLD,
-                    color=ft.colors.BLUE_900
+                    color=ft.Colors.BLUE_900
                 ),
                 ft.Text(
                     "Extração estruturada de autos trabalhistas",
                     size=14,
-                    color=ft.colors.GREY_700
+                    color=ft.Colors.GREY_700
                 ),
             ]),
             padding=20,
-            bgcolor=ft.colors.BLUE_50,
+            bgcolor=ft.Colors.BLUE_50,
         )
         
         painel_config = ft.Card(
             content=ft.Container(
                 content=ft.Column([
                     ft.Text("⚙️ Configuração", size=18, weight=ft.FontWeight.BOLD),
-                    ft.Row([self.campo_api_key, self.dropdown_modelo]),
+                    ft.Row([self.campo_api_key, self.dropdown_modelo, self.dropdown_reasoning]),
                     ft.Divider(),
                     ft.Text("📄 Selecionar Autos", size=18, weight=ft.FontWeight.BOLD),
                     self.btn_selecionar,
@@ -201,6 +214,45 @@ class CartaoDoCasoApp:
     def _atualizar_modelo(self, e):
         """Atualiza modelo selecionado."""
         self.modelo_grok = e.control.value
+        self._sincronizar_dropdown_reasoning()
+        self.page.update()
+
+    def _atualizar_reasoning(self, e):
+        """Atualiza nível de reasoning quando o modelo permitir."""
+        from xai_reasoning import modelo_suporta_reasoning, normalizar_reasoning_effort, DEFAULT_REASONING_EFFORT
+        if not modelo_suporta_reasoning(self.modelo_grok):
+            return
+        self.reasoning_effort = normalizar_reasoning_effort(
+            self.modelo_grok,
+            self.dropdown_reasoning.value,
+        ) or DEFAULT_REASONING_EFFORT
+
+    def _sincronizar_dropdown_reasoning(self):
+        """Atualiza opções do dropdown de reasoning conforme o modelo."""
+        from xai_reasoning import (
+            LABELS_REASONING,
+            DEFAULT_REASONING_EFFORT,
+            niveis_reasoning_para_modelo,
+            normalizar_reasoning_effort,
+        )
+        niveis = niveis_reasoning_para_modelo(self.modelo_grok)
+        if not niveis:
+            self.dropdown_reasoning.options = [
+                ft.dropdown.Option("", "Não disponível")
+            ]
+            self.dropdown_reasoning.value = ""
+            self.dropdown_reasoning.disabled = True
+            return
+        self.dropdown_reasoning.disabled = False
+        self.dropdown_reasoning.options = [
+            ft.dropdown.Option(nivel, LABELS_REASONING.get(nivel, nivel))
+            for nivel in niveis
+        ]
+        self.reasoning_effort = normalizar_reasoning_effort(
+            self.modelo_grok,
+            self.reasoning_effort or DEFAULT_REASONING_EFFORT,
+        )
+        self.dropdown_reasoning.value = self.reasoning_effort
     
     def _verificar_pode_extrair(self):
         """Verifica se pode habilitar botão de extração."""
@@ -209,28 +261,20 @@ class CartaoDoCasoApp:
     
     def _selecionar_arquivo(self, e):
         """Abre diálogo para selecionar arquivo ou pasta."""
-        def resultado_arquivo(result: ft.FilePickerResultEvent):
-            if result.files:
-                self.caminho_arquivo = Path(result.files[0].path)
-                self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.colors.GREEN_700
-                self._verificar_pode_extrair()
-            elif result.path:
-                self.caminho_arquivo = Path(result.path)
-                self.campo_arquivo.value = str(self.caminho_arquivo)
-                self.campo_arquivo.color = ft.colors.GREEN_700
-                self._verificar_pode_extrair()
-            self.page.update()
-        
-        picker = ft.FilePicker(on_result=resultado_arquivo)
-        self.page.overlay.append(picker)
-        self.page.update()
-        
-        picker.pick_files(
+        self.file_picker.pick_files(
             dialog_title="Escolher arquivo MD de autos",
             allowed_extensions=["md"],
-            allow_multiple=False
+            allow_multiple=False,
         )
+
+    def _on_arquivo_selecionado(self, e: ft.FilePickerResultEvent):
+        """Callback do FilePicker de abertura."""
+        if e.files:
+            self.caminho_arquivo = Path(e.files[0].path)
+            self.campo_arquivo.value = str(self.caminho_arquivo)
+            self.campo_arquivo.color = ft.Colors.GREEN_700
+            self._verificar_pode_extrair()
+            self.page.update()
     
     def _mostrar_progresso(self, mensagem: str):
         """Mostra progresso."""
@@ -252,7 +296,11 @@ class CartaoDoCasoApp:
         self.page.update()
         
         try:
-            self.extrator = ExtratorCartao(self.api_key, self.modelo_grok)
+            self.extrator = ExtratorCartao(
+                self.api_key,
+                self.modelo_grok,
+                reasoning_effort=self.reasoning_effort,
+            )
             
             if self.caminho_arquivo.is_file():
                 self.cartao_atual = self.extrator.extrair_de_arquivo(
@@ -329,7 +377,7 @@ class CartaoDoCasoApp:
                         ft.DataCell(
                             ft.Text(
                                 "Sim" if contestacao and contestacao.impugnacao_especifica else "Não",
-                                color=ft.colors.GREEN if contestacao and contestacao.impugnacao_especifica else ft.colors.RED
+                                color=ft.Colors.GREEN if contestacao and contestacao.impugnacao_especifica else ft.Colors.RED
                             )
                         ),
                     ]
@@ -352,7 +400,7 @@ class CartaoDoCasoApp:
                 ft.Text(f"Total de pedidos: {len(pedidos)}", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(
                     content=tabela,
-                    border=ft.border.all(1, ft.colors.GREY_300),
+                    border=ft.border.all(1, ft.Colors.GREY_300),
                     border_radius=5,
                     padding=10
                 )
@@ -416,11 +464,11 @@ class CartaoDoCasoApp:
                 ft.Text(
                     "✏️ Você pode desmarcar questões que não devem ser mencionadas na minuta",
                     size=12,
-                    color=ft.colors.BLUE_700
+                    color=ft.Colors.BLUE_700
                 ),
                 ft.Container(
                     content=tabela,
-                    border=ft.border.all(1, ft.colors.GREY_300),
+                    border=ft.border.all(1, ft.Colors.GREY_300),
                     border_radius=5,
                     padding=10
                 )
@@ -438,7 +486,7 @@ class CartaoDoCasoApp:
         
         if not avisos:
             self.abas.tabs[2].content = ft.Container(
-                content=ft.Text("✅ Nenhum aviso (extração completa)", size=16, color=ft.colors.GREEN),
+                content=ft.Text("✅ Nenhum aviso (extração completa)", size=16, color=ft.Colors.GREEN),
                 padding=20
             )
             return
@@ -447,18 +495,18 @@ class CartaoDoCasoApp:
         
         for aviso in avisos:
             cor_icone = {
-                "falta_impugnacao_especifica": ft.colors.ORANGE,
-                "possivel_irrelevancia": ft.colors.YELLOW_700,
-                "falta_id_pje": ft.colors.BLUE,
-                "falta_folhas": ft.colors.BLUE,
-                "dado_ausente": ft.colors.RED,
-                "outro": ft.colors.GREY
-            }.get(aviso.tipo, ft.colors.GREY)
+                "falta_impugnacao_especifica": ft.Colors.ORANGE,
+                "possivel_irrelevancia": ft.Colors.YELLOW_700,
+                "falta_id_pje": ft.Colors.BLUE,
+                "falta_folhas": ft.Colors.BLUE,
+                "dado_ausente": ft.Colors.RED,
+                "outro": ft.Colors.GREY
+            }.get(aviso.tipo, ft.Colors.GREY)
             
             itens_avisos.append(
                 ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.icons.WARNING, color=cor_icone, size=24),
+                        ft.Icon(ft.Icons.WARNING, color=cor_icone, size=24),
                         ft.Column([
                             ft.Text(aviso.tipo.replace("_", " ").title(), weight=ft.FontWeight.BOLD),
                             ft.Text(aviso.descricao, size=12),
@@ -467,7 +515,7 @@ class CartaoDoCasoApp:
                     padding=10,
                     border=ft.border.all(1, cor_icone),
                     border_radius=5,
-                    bgcolor=ft.colors.with_opacity(0.1, cor_icone)
+                    bgcolor=ft.Colors.with_opacity(0.1, cor_icone)
                 )
             )
         
@@ -499,7 +547,7 @@ class CartaoDoCasoApp:
                         size=11,
                         font_family="Courier"
                     ),
-                    bgcolor=ft.colors.GREY_900,
+                    bgcolor=ft.Colors.GREY_900,
                     padding=10,
                     border_radius=5
                 )
@@ -540,72 +588,63 @@ class CartaoDoCasoApp:
     
     def _exportar_json(self, e):
         """Exporta JSON para local escolhido pelo usuário."""
-        def resultado_exportar(result: ft.FilePickerResultEvent):
-            if result.path:
-                try:
-                    caminho_destino = Path(result.path)
-                    if not caminho_destino.suffix:
-                        caminho_destino = caminho_destino.with_suffix(".json")
-                    
-                    self.persistencia.exportar_cartao(self.cartao_atual, caminho_destino)
-                    self._mostrar_sucesso(f"JSON exportado para: {caminho_destino}")
-                except Exception as ex:
-                    self._mostrar_erro(f"Erro ao exportar: {ex}")
-        
-        picker = ft.FilePicker(on_result=resultado_exportar)
-        self.page.overlay.append(picker)
-        self.page.update()
-        
-        picker.save_file(
+        self.save_picker.save_file(
             dialog_title="Exportar JSON do Cartão",
             file_name=f"cartao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            allowed_extensions=["json"]
+            allowed_extensions=["json"],
         )
+
+    def _on_exportar_selecionado(self, e: ft.FilePickerResultEvent):
+        """Callback do FilePicker de exportação."""
+        if not e.path or not self.cartao_atual:
+            return
+        try:
+            caminho_destino = Path(e.path)
+            if not caminho_destino.suffix:
+                caminho_destino = caminho_destino.with_suffix(".json")
+
+            self.persistencia.exportar_cartao(self.cartao_atual, caminho_destino)
+            self._mostrar_sucesso(f"JSON exportado para: {caminho_destino}")
+        except Exception as ex:
+            self._mostrar_erro(f"Erro ao exportar: {ex}")
     
     def _mostrar_erro(self, mensagem: str):
         """Mostra snackbar de erro."""
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(mensagem, color=ft.colors.WHITE),
-            bgcolor=ft.colors.RED_700
+        self.page.open(
+            ft.SnackBar(
+                content=ft.Text(mensagem, color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.RED_700,
+            )
         )
-        self.page.snack_bar.open = True
-        self.page.update()
     
     def _mostrar_sucesso(self, mensagem: str):
         """Mostra snackbar de sucesso."""
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(mensagem, color=ft.colors.WHITE),
-            bgcolor=ft.colors.GREEN_700
+        self.page.open(
+            ft.SnackBar(
+                content=ft.Text(mensagem, color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.GREEN_700,
+            )
         )
-        self.page.snack_bar.open = True
-        self.page.update()
     
     def _mostrar_dialogo(self, titulo: str, mensagem: str, sucesso: bool = False):
         """Mostra diálogo modal."""
-        cor = ft.colors.GREEN if sucesso else ft.colors.BLUE
+        cor = ft.Colors.GREEN if sucesso else ft.Colors.BLUE
         
         dlg = ft.AlertDialog(
             title=ft.Text(titulo, color=cor, weight=ft.FontWeight.BOLD),
             content=ft.Text(mensagem),
             actions=[
-                ft.TextButton("OK", on_click=lambda e: self._fechar_dialogo(dlg))
+                ft.TextButton("OK", on_click=lambda e: self.page.close(dlg))
             ],
             actions_alignment=ft.MainAxisAlignment.END
         )
         
-        self.page.dialog = dlg
-        dlg.open = True
-        self.page.update()
-    
-    def _fechar_dialogo(self, dialogo):
-        """Fecha diálogo."""
-        dialogo.open = False
-        self.page.update()
+        self.page.open(dlg)
 
 
 def main(page: ft.Page):
     """Função principal da aplicação."""
-    app = CartaoDoCasoApp(page)
+    CartaoDoCasoApp(page)
 
 
 if __name__ == "__main__":

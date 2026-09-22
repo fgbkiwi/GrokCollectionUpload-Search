@@ -24,7 +24,7 @@ class AbaDossie:
         self.texto_status_cartao = ft.Text(
             "Aguardando cartão confirmado...",
             size=14,
-            color=ft.colors.ORANGE
+            color=ft.Colors.ORANGE
         )
         
         self.campo_autos = ft.Text(
@@ -34,21 +34,21 @@ class AbaDossie:
         
         self.btn_selecionar_autos = ft.ElevatedButton(
             "Escolher Autos (MD)",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_autos,
             disabled=True
         )
         
         self.btn_montar = ft.ElevatedButton(
             "Montar Dossiê",
-            icon=ft.icons.BUILD,
+            icon=ft.Icons.BUILD,
             on_click=self._montar_dossie,
             disabled=True
         )
         
         self.btn_confirmar = ft.ElevatedButton(
             "Confirmar Dossiê",
-            icon=ft.icons.CHECK,
+            icon=ft.Icons.CHECK,
             on_click=self._confirmar_dossie,
             disabled=True
         )
@@ -60,6 +60,9 @@ class AbaDossie:
             scroll=ft.ScrollMode.AUTO,
             expand=True
         )
+
+        self.file_picker = ft.FilePicker(on_result=self._on_autos_selecionados)
+        self.app.page.overlay.append(self.file_picker)
         
         return ft.Container(
             content=ft.Column(
@@ -97,27 +100,25 @@ class AbaDossie:
     def habilitar_montagem(self):
         """Habilita a montagem após cartão confirmado."""
         self.texto_status_cartao.value = f"Cartão confirmado: {self.cartao_confirmado.numero_processo or 'processo'}"
-        self.texto_status_cartao.color = ft.colors.GREEN
+        self.texto_status_cartao.color = ft.Colors.GREEN
         self.btn_selecionar_autos.disabled = False
         self.app.page.update()
     
     def _selecionar_autos(self, e):
         """Seleciona arquivo de autos."""
-        def on_result(result: ft.FilePickerResultEvent):
-            if result.files:
-                self.caminho_autos = Path(result.files[0].path)
-                self.campo_autos.value = self.caminho_autos.name
-                self.btn_montar.disabled = False
-                self.app.page.update()
-        
-        picker = ft.FilePicker(on_result=on_result)
-        self.app.page.overlay.append(picker)
-        self.app.page.update()
-        
-        picker.pick_files(
+        self.file_picker.pick_files(
             allowed_extensions=["md"],
-            dialog_title="Selecione o arquivo MD dos autos"
+            dialog_title="Selecione o arquivo MD dos autos",
+            allow_multiple=False,
         )
+
+    def _on_autos_selecionados(self, e: ft.FilePickerResultEvent):
+        """Callback do FilePicker."""
+        if e.files:
+            self.caminho_autos = Path(e.files[0].path)
+            self.campo_autos.value = self.caminho_autos.name
+            self.btn_montar.disabled = False
+            self.app.page.update()
     
     def _montar_dossie(self, e):
         """Monta o dossiê de prova."""
@@ -137,7 +138,8 @@ class AbaDossie:
         try:
             orquestrador = OrquestradorDossie(
                 api_key=self.app.api_key,
-                modelo="grok-beta"
+                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
+                reasoning_effort=getattr(self.app, "reasoning_effort", None),
             )
             
             self.dossie_atual, avisos = orquestrador.montar_dossie(

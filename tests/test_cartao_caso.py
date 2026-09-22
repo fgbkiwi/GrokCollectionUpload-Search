@@ -275,23 +275,43 @@ class TestSchema:
         assert questao.de_oficio is True
         assert questao.mencionar_na_minuta is False
     
-    def test_questao_de_oficio_com_extincao_mencionar(self):
-        """Testa questão de ofício com extinção que DEVE ser mencionada."""
-        questao = Questao(
-            id="Q2",
-            titulo="Prescrição (de ofício)",
-            tipo="direito",
-            momento="preliminar",
-            de_oficio=True,
-            arguida_na_defesa=False,
-            acarreta_extincao=True,
-            mencionar_na_minuta=True,
-            fontes=[]
+    def test_peticao_inicial_null_nao_quebra_validacao(self):
+        """LLM às vezes devolve peticao_inicial=null; schema deve aceitar."""
+        cartao = CartaoDoCaso(
+            arquivo_origem="teste.md",
+            numero_processo="0001234-56.2023.5.10.0001",
+            peticao_inicial=None,
+            replica=None,
+            contestacoes=None,
+            questoes=None,
+            avisos=None,
         )
-        
-        assert questao.de_oficio is True
-        assert questao.acarreta_extincao is True
-        assert questao.mencionar_na_minuta is True
+        assert isinstance(cartao.peticao_inicial, dict)
+        assert cartao.peticao_inicial.get("pedidos") == []
+        assert cartao.replica.existe is False
+        assert cartao.contestacoes == []
+        assert cartao.questoes == []
+
+    def test_normalizar_recupera_pedidos_no_nivel_raiz(self):
+        from cartao_caso.extrator import ExtratorCartao
+        dados = {
+            "peticao_inicial": {"causa_pedir": "x", "pedidos": []},
+            "pedidos": [
+                {"id": "P1", "descricao": "Diferenças salariais", "reflexos": True, "fontes": []}
+            ],
+            "questoes": [],
+            "avisos": [],
+        }
+        ExtratorCartao._normalizar_resposta_llm(dados)
+        assert len(dados["peticao_inicial"]["pedidos"]) == 1
+        assert dados["peticao_inicial"]["pedidos"][0]["id"] == "P1"
+
+    def test_garantir_conteudo_minimo_rejeita_vazio(self):
+        from cartao_caso.extrator import ExtratorCartao
+        extrator = ExtratorCartao("fake")
+        cartao = CartaoDoCaso(arquivo_origem="x.md")
+        with pytest.raises(RuntimeError, match="nenhum pedido nem questão"):
+            extrator._garantir_conteudo_minimo(cartao)
 
 
 class TestExtrator:
@@ -333,10 +353,11 @@ class TestExtrator:
         """Testa fallback quando não consegue listar modelos."""
         extrator = ExtratorCartao(api_key="test-key")
         
-        with patch.object(extrator.session, 'get', side_effect=Exception("Network error")):
+        with patch("xai_models.requests.get", side_effect=Exception("Network error")):
             modelos = extrator.listar_modelos()
             
-            assert "grok-beta" in modelos
+            assert "grok-4.6" in modelos
+            assert len(modelos) >= 1
 
 
 class TestPersistencia:

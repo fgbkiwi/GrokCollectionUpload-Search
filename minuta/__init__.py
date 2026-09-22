@@ -16,12 +16,14 @@ from .schema import (
     MinutaCompleta,
     EstruturaMinuta,
     TopicoEstrutura,
+    TipoTopico,
     MinutaTopico,
     MinutaDefinitiva,
     Precedente,
     TipoPrecedente,
 )
 from .kernel_sarah import KernelSarah
+from .kernel_pafuncio import KernelPafuncio
 from .modelos_tematicos import BibliotecaModelos, ModeloTematico
 from .busca_precedentes import BuscaPrecedentes
 from .orquestrador import OrquestradorMinuta
@@ -31,11 +33,13 @@ __all__ = [
     "MinutaCompleta",
     "EstruturaMinuta",
     "TopicoEstrutura",
+    "TipoTopico",
     "MinutaTopico",
     "MinutaDefinitiva",
     "Precedente",
     "TipoPrecedente",
     "KernelSarah",
+    "KernelPafuncio",
     "BibliotecaModelos",
     "ModeloTematico",
     "BuscaPrecedentes",

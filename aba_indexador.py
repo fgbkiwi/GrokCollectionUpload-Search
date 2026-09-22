@@ -23,13 +23,13 @@ class AbaIndexador:
         
         self.btn_selecionar_pasta = ft.ElevatedButton(
             "Escolher Pasta de Sentenças (MD)",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._selecionar_pasta
         )
         
         self.btn_indexar = ft.ElevatedButton(
             "Indexar na Collection",
-            icon=ft.icons.UPLOAD,
+            icon=ft.Icons.UPLOAD,
             on_click=self._indexar,
             disabled=True
         )
@@ -41,6 +41,9 @@ class AbaIndexador:
             scroll=ft.ScrollMode.AUTO,
             expand=True
         )
+
+        self.folder_picker = ft.FilePicker(on_result=self._on_pasta_selecionada)
+        self.app.page.overlay.append(self.folder_picker)
         
         return ft.Container(
             content=ft.Column(
@@ -51,7 +54,7 @@ class AbaIndexador:
                             ft.Text(
                                 "Indexa sentenças publicadas na Collection xAI para busca de precedentes",
                                 size=12,
-                                color=ft.colors.GREY_700
+                                color=ft.Colors.GREY_700
                             ),
                             ft.Divider(),
                             ft.Row([
@@ -78,20 +81,17 @@ class AbaIndexador:
     
     def _selecionar_pasta(self, e):
         """Seleciona pasta de sentenças."""
-        def on_result(result: ft.FilePickerResultEvent):
-            if result.path:
-                self.caminho_pasta = Path(result.path)
-                self.campo_pasta.value = str(self.caminho_pasta)
-                self.btn_indexar.disabled = False
-                self.app.page.update()
-        
-        picker = ft.FilePicker(on_result=on_result)
-        self.app.page.overlay.append(picker)
-        self.app.page.update()
-        
-        picker.get_directory_path(
+        self.folder_picker.get_directory_path(
             dialog_title="Selecione a pasta com sentenças em MD"
         )
+
+    def _on_pasta_selecionada(self, e: ft.FilePickerResultEvent):
+        """Callback do FilePicker de pasta."""
+        if e.path:
+            self.caminho_pasta = Path(e.path)
+            self.campo_pasta.value = str(self.caminho_pasta)
+            self.btn_indexar.disabled = False
+            self.app.page.update()
     
     def _indexar(self, e):
         """Indexa sentenças na Collection."""
@@ -129,8 +129,16 @@ class AbaIndexador:
                 self.app.mostrar_erro("Nenhuma Collection encontrada. Crie uma Collection primeiro.")
                 return
             
-            collection_id = collections[0]["id"]
-            self._log(f"Usando Collection: {collections[0]['name']}")
+            collection_id = collections[0].get("id") or collections[0].get("collection_id")
+            collection_name = (
+                collections[0].get("name")
+                or collections[0].get("collection_name")
+                or collection_id
+            )
+            if not collection_id:
+                self.app.mostrar_erro("Collection retornada sem ID válido.")
+                return
+            self._log(f"Usando Collection: {collection_name}")
             
             total = len(documentos)
             for i, doc_path in enumerate(documentos):
@@ -158,7 +166,7 @@ class AbaIndexador:
     
     def _log(self, mensagem: str, erro: bool = False):
         """Adiciona mensagem ao log."""
-        cor = ft.colors.RED if erro else ft.colors.BLACK
+        cor = ft.Colors.RED if erro else ft.Colors.BLACK
         self.area_log.controls.append(
             ft.Text(mensagem, size=12, color=cor)
         )

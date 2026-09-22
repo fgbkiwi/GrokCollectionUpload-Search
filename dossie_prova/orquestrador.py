@@ -17,12 +17,18 @@ from .examinador_oral import ExaminadorOral
 class OrquestradorDossie:
     """Orquestra a montagem do dossiê de prova."""
     
-    def __init__(self, api_key: str, modelo: str = "grok-beta"):
+    def __init__(
+        self,
+        api_key: str,
+        modelo: str = "grok-4.6",
+        reasoning_effort: Optional[str] = None,
+    ):
         self.api_key = api_key
         self.modelo = modelo
-        self.examinador_documental = ExaminadorDocumental(api_key, modelo)
-        self.examinador_pericial = ExaminadorPericial(api_key, modelo)
-        self.examinador_oral = ExaminadorOral(api_key, modelo)
+        self.reasoning_effort = reasoning_effort
+        self.examinador_documental = ExaminadorDocumental(api_key, modelo, reasoning_effort)
+        self.examinador_pericial = ExaminadorPericial(api_key, modelo, reasoning_effort)
+        self.examinador_oral = ExaminadorOral(api_key, modelo, reasoning_effort)
     
     def montar_dossie(
         self,
