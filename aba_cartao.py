@@ -15,6 +15,8 @@ from cartao_caso import (
     Pedido,
     Questao,
 )
+from ui_modelo_reasoning import SeletorModeloReasoning
+from xai_models import DEFAULT_MODEL
 
 
 class AbaCartao:
@@ -26,10 +28,13 @@ class AbaCartao:
         self.cartao_atual: Optional[CartaoDoCaso] = None
         self.extrator: Optional[ExtratorCartao] = None
         self.persistencia = PersistenciaCartao()
+        self.seletor_modelo: Optional[SeletorModeloReasoning] = None
 
     def construir(self) -> ft.Container:
         """Constrói a interface da aba."""
         self.campo_arquivo = ft.Text("Nenhum arquivo selecionado", size=14)
+
+        self.seletor_modelo = SeletorModeloReasoning(self.app, "cartao")
 
         self.btn_selecionar = ft.ElevatedButton(
             "Escolher Arquivo MD",
@@ -85,7 +90,15 @@ class AbaCartao:
                                     weight=ft.FontWeight.BOLD,
                                 ),
                                 ft.Divider(),
-                                ft.Row([self.btn_selecionar, self.campo_arquivo]),
+                                ft.Row(
+                                    [
+                                        *self.seletor_modelo.controles(),
+                                        self.btn_selecionar,
+                                        self.campo_arquivo,
+                                    ],
+                                    wrap=True,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
                                 ft.Row([self.btn_extrair, self.btn_confirmar]),
                                 self.progresso,
                                 self.texto_status,
@@ -143,8 +156,8 @@ class AbaCartao:
         try:
             self.extrator = ExtratorCartao(
                 api_key=self.app.api_key,
-                model=getattr(self.app, "modelo_grok", None) or "grok-4.6",
-                reasoning_effort=getattr(self.app, "reasoning_effort", None),
+                model=getattr(self.app, "modelo_cartao", None) or DEFAULT_MODEL,
+                reasoning_effort=getattr(self.app, "reasoning_cartao", None),
             )
 
             self.cartao_atual = self.extrator.extrair_de_arquivo(
@@ -499,7 +512,7 @@ class AbaCartao:
             self.app.mostrar_info(f"Cartão salvo em:\n{caminho_salvo}")
 
             self.app.aba_dossie.cartao_confirmado = self.cartao_atual
-            self.app.aba_dossie.habilitar_montagem()
+            self.app.aba_dossie.habilitar_montagem(caminho_autos=self.caminho_arquivo)
 
         except Exception as ex:
             self.app.mostrar_erro(f"Erro ao salvar: {str(ex)}")

@@ -46,7 +46,7 @@ class AbaConfiguracoes:
 
         modelo_atual = getattr(self.app, "modelo_grok", None) or DEFAULT_MODEL
         self.dropdown_modelo = ft.Dropdown(
-            label="Modelo Grok",
+            label="Modelo padrão (global)",
             width=500,
             value=modelo_atual,
             options=[
@@ -62,11 +62,22 @@ class AbaConfiguracoes:
         self.texto_modelos = ft.Text(size=12, color=ft.Colors.GREY_700)
 
         self.dropdown_reasoning = ft.Dropdown(
-            label="Nível de reasoning",
+            label="Reasoning padrão (global)",
             width=500,
             on_change=self._atualizar_reasoning,
         )
         self.texto_reasoning = ft.Text(size=12, color=ft.Colors.GREY_700)
+        self.btn_aplicar_fases = ft.OutlinedButton(
+            "Aplicar às três fases",
+            icon=ft.Icons.CONTENT_COPY,
+            on_click=self._aplicar_as_tres_fases,
+        )
+        self.texto_aplicar = ft.Text(
+            "Copia o modelo e o reasoning padrão para Cartão, Dossiê e Minuta. "
+            "Cada aba também permite ajuste independente.",
+            size=12,
+            color=ft.Colors.GREY_700,
+        )
         self._sincronizar_dropdown_modelos()
         self._sincronizar_dropdown_reasoning()
 
@@ -150,6 +161,11 @@ class AbaConfiguracoes:
                             self.texto_modelos,
                             self.dropdown_reasoning,
                             self.texto_reasoning,
+                            ft.Row(
+                                [self.btn_aplicar_fases],
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            self.texto_aplicar,
                             ft.Text(
                                 "As chaves são carregadas de app_config.json quando disponível",
                                 size=12,
@@ -267,6 +283,7 @@ class AbaConfiguracoes:
         """Recarrega a lista de modelos sob demanda."""
         self._sincronizar_dropdown_modelos()
         self._sincronizar_dropdown_reasoning()
+        self._sincronizar_seletores_fases()
         self._persistir_config()
         self.app.page.update()
 
@@ -297,8 +314,28 @@ class AbaConfiguracoes:
         self.dropdown_reasoning.value = atual
         self.app.reasoning_effort = atual
         self.texto_reasoning.value = (
-            "Controla a profundidade de raciocínio do modelo (latência × qualidade)."
+            "Padrão global: profundidade de raciocínio (latência × qualidade). "
+            "Use «Aplicar às três fases» para propagar."
         )
+
+    def _sincronizar_seletores_fases(self) -> None:
+        """Atualiza dropdowns de modelo/reasoning nas abas Cartão/Dossiê/Minuta."""
+        for aba_nome in ("aba_cartao", "aba_dossie", "aba_minuta"):
+            aba = getattr(self.app, aba_nome, None)
+            seletor = getattr(aba, "seletor_modelo", None) if aba else None
+            if seletor is not None:
+                seletor.sincronizar(atualizar_page=False)
+
+    def _aplicar_as_tres_fases(self, e):
+        """Copia o padrão global para as três fases."""
+        aplicar = getattr(self.app, "aplicar_padrao_global_as_fases", None)
+        if callable(aplicar):
+            aplicar()
+            self.app.mostrar_info(
+                "Modelo e reasoning padrão aplicados a Cartão, Dossiê e Minuta."
+            )
+        else:
+            self.app.mostrar_erro("Aplicação não disponível nesta sessão.")
 
     def _atualizar_api_key(self, e):
         """Atualiza API Key (persistência; lista de modelos no blur/botão)."""
@@ -310,6 +347,7 @@ class AbaConfiguracoes:
         self.app.api_key = self.campo_api_key.value
         self._sincronizar_dropdown_modelos()
         self._sincronizar_dropdown_reasoning()
+        self._sincronizar_seletores_fases()
         self._persistir_config()
         self.app.page.update()
 
@@ -319,14 +357,14 @@ class AbaConfiguracoes:
         self._persistir_config()
 
     def _atualizar_modelo(self, e):
-        """Atualiza modelo Grok."""
+        """Atualiza modelo Grok padrão global."""
         self.app.modelo_grok = self.dropdown_modelo.value or DEFAULT_MODEL
         self._sincronizar_dropdown_reasoning()
         self._persistir_config()
         self.app.page.update()
 
     def _atualizar_reasoning(self, e):
-        """Atualiza nível de reasoning quando o modelo permitir."""
+        """Atualiza nível de reasoning padrão quando o modelo permitir."""
         modelo = self.app.modelo_grok or DEFAULT_MODEL
         if not modelo_suporta_reasoning(modelo):
             return

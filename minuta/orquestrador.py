@@ -79,18 +79,42 @@ class OrquestradorMinuta:
         prompt_estrutura = self._construir_prompt_estrutura(cartao, dossie)
         
         prompt_sistema = self.kernel.obter_prompt()
+        # Estrutura é JSON curto: reasoning alto/xhigh costuma estourar timeout
+        # sem ganho; prévia/definitiva continuam com o nível escolhido na aba.
+        reasoning_estrutura = self._limitar_reasoning_estrutura(self.reasoning_effort)
+        if (
+            self.reasoning_effort
+            and reasoning_estrutura
+            and reasoning_estrutura != str(self.reasoning_effort).strip().lower()
+        ):
+            avisos.append(
+                f"Reasoning da estrutura limitado a '{reasoning_estrutura}' "
+                f"(aba Minuta: '{self.reasoning_effort}') para evitar timeout."
+            )
         
         try:
             resposta = self._chamar_api(
                 prompt_sistema,
                 prompt_estrutura,
-                json_mode=True
+                json_mode=True,
+                reasoning_effort=reasoning_estrutura,
             )
             
             dados = json.loads(resposta)
-            
+            if not isinstance(dados, dict):
+                raise ValueError("JSON da estrutura não é um objeto")
+
+            lista_bruta = dados.get("topicos")
+            if lista_bruta is None:
+                for alt in ("tópicos", "topics", "estrutura", "secoes", "seções"):
+                    if isinstance(dados.get(alt), list):
+                        lista_bruta = dados[alt]
+                        break
+            if not isinstance(lista_bruta, list):
+                lista_bruta = []
+
             topicos = []
-            for t in dados.get("topicos", []):
+            for t in lista_bruta:
                 if not isinstance(t, dict):
                     continue
                 qid = t.get("questao_id")
@@ -103,10 +127,20 @@ class OrquestradorMinuta:
                     topico = TopicoEstrutura(**t)
                 except Exception:
                     t["tipo"] = TipoTopico.OUTRO.value
-                    topico = TopicoEstrutura(**t)
+                    try:
+                        topico = TopicoEstrutura(**t)
+                    except Exception as ex_topico:
+                        avisos.append(f"Tópico ignorado por schema inválido: {ex_topico}")
+                        continue
                 topico = self._normalizar_tipo_topico(topico)
                 topicos.append(topico)
             
+            if not topicos:
+                avisos.append(
+                    "A API respondeu sem tópicos válidos. "
+                    "Tente gerar de novo ou ajustar modelo/reasoning."
+                )
+
             estrutura = EstruturaMinuta(topicos=topicos)
             
             return estrutura, avisos
@@ -283,9 +317,12 @@ class OrquestradorMinuta:
         self,
         prompt_sistema: str,
         prompt_usuario: str,
-        json_mode: bool = False
+        json_mode: bool = False,
+        reasoning_effort: Optional[str] = None,
+        timeout: Optional[float] = None,
+        tentativas: int = 2,
     ) -> str:
-        """Chama a API xAI."""
+        """Chama a API xAI (com timeout por reasoning e 1 retry em timeout)."""
         import requests
         from xai_reasoning import aplicar_reasoning_effort
         
@@ -293,6 +330,13 @@ class OrquestradorMinuta:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+        effort = (
+            reasoning_effort
+            if reasoning_effort is not None
+            else self.reasoning_effort
+        )
+        timeout_s = timeout if timeout is not None else self._timeout_para_reasoning(effort)
         
         payload = {
             "model": self.modelo,
@@ -305,18 +349,99 @@ class OrquestradorMinuta:
         
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
-        
-        response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=180
-        )
-        response.raise_for_status()
-        
-        resultado = response.json()
-        return resultado["choices"][0]["message"]["content"]
+        aplicar_reasoning_effort(payload, self.modelo, effort)
+
+        ultimo_erro: Optional[Exception] = None
+        for tentativa in range(1, max(1, tentativas) + 1):
+            try:
+                response = requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout_s,
+                )
+                response.raise_for_status()
+                resultado = response.json()
+                conteudo = self._extrair_texto_resposta(resultado)
+                if json_mode:
+                    conteudo = self._limpar_cerca_json(conteudo)
+                return conteudo
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout) as e:
+                ultimo_erro = e
+                if tentativa >= tentativas:
+                    break
+                continue
+            except requests.exceptions.RequestException:
+                raise
+
+        raise TimeoutError(
+            f"Timeout após {tentativas} tentativa(s) "
+            f"(limite {int(timeout_s)}s, reasoning={effort or 'padrão'}). "
+            "Reduza o reasoning da Minuta ou tente novamente."
+        ) from ultimo_erro
+
+    @staticmethod
+    def _timeout_para_reasoning(effort: Optional[str]) -> float:
+        """Timeout de leitura proporcional ao nível de reasoning."""
+        nivel = (effort or "").strip().lower()
+        return {
+            "none": 120.0,
+            "low": 180.0,
+            "medium": 300.0,
+            "high": 480.0,
+            "xhigh": 600.0,
+        }.get(nivel, 300.0)
+
+    @staticmethod
+    def _limitar_reasoning_estrutura(effort: Optional[str]) -> Optional[str]:
+        """Estrutura JSON: no máximo medium (evita timeout com high/xhigh)."""
+        nivel = (effort or "").strip().lower()
+        if not nivel:
+            return "medium"
+        if nivel in ("high", "xhigh"):
+            return "medium"
+        return nivel
+
+    @staticmethod
+    def _extrair_texto_resposta(data: Dict[str, Any]) -> str:
+        """Obtém texto da resposta chat/completions (string ou blocos)."""
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise ValueError(f"Resposta da API sem choices/message: {e}") from e
+
+        conteudo = message.get("content")
+        if isinstance(conteudo, list):
+            partes = []
+            for bloco in conteudo:
+                if isinstance(bloco, dict):
+                    partes.append(bloco.get("text") or bloco.get("content") or "")
+                else:
+                    partes.append(str(bloco))
+            conteudo = "".join(partes)
+
+        if not conteudo or not str(conteudo).strip():
+            # Alguns modelos com reasoning devolvem o útil em refusal/outros campos
+            for alt in ("refusal", "reasoning_content"):
+                alt_val = message.get(alt)
+                if isinstance(alt_val, str) and alt_val.strip():
+                    raise ValueError(
+                        f"A API devolveu content vazio (campo '{alt}' presente). "
+                        "Tente outro nível de reasoning ou modelo."
+                    )
+            raise ValueError(
+                "A API devolveu content vazio. Tente novamente ou use outro modelo."
+            )
+        return str(conteudo)
+
+    @staticmethod
+    def _limpar_cerca_json(conteudo: str) -> str:
+        """Remove cercas ```json se o modelo as incluir."""
+        texto = (conteudo or "").strip()
+        if texto.startswith("```"):
+            texto = re.sub(r"^```(?:json)?\s*", "", texto, flags=re.IGNORECASE)
+            texto = re.sub(r"\s*```$", "", texto)
+        return texto
     
     def _construir_prompt_estrutura(
         self,

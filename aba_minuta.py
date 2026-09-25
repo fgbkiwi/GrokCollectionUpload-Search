@@ -13,6 +13,8 @@ from minuta import (
     MinutaCompleta,
     MinutaTopico,
 )
+from ui_modelo_reasoning import SeletorModeloReasoning
+from xai_models import DEFAULT_MODEL
 
 
 class AbaMinuta:
@@ -25,6 +27,7 @@ class AbaMinuta:
         self.estrutura: Optional[EstruturaMinuta] = None
         self.collection_id: Optional[str] = None
         self.persistencia = PersistenciaMinuta()
+        self.seletor_modelo: Optional[SeletorModeloReasoning] = None
     
     def construir(self) -> ft.Container:
         """Constrói a interface da aba."""
@@ -33,6 +36,8 @@ class AbaMinuta:
             size=14,
             color=ft.Colors.ORANGE
         )
+
+        self.seletor_modelo = SeletorModeloReasoning(self.app, "minuta")
         
         self.dropdown_collection = ft.Dropdown(
             label="Collection de Precedentes",
@@ -93,10 +98,15 @@ class AbaMinuta:
                                 self.campo_top_k,
                                 self.dropdown_mode,
                             ]),
-                            ft.Row([
-                                self.btn_gerar_estrutura,
-                                self.btn_gerar_minuta,
-                            ]),
+                            ft.Row(
+                                [
+                                    *self.seletor_modelo.controles(),
+                                    self.btn_gerar_estrutura,
+                                    self.btn_gerar_minuta,
+                                ],
+                                wrap=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
                             self.progresso,
                             self.texto_progresso,
                         ]),
@@ -187,15 +197,18 @@ class AbaMinuta:
             return
         
         self.progresso.visible = True
-        self.texto_progresso.value = "Gerando estrutura..."
+        self.texto_progresso.value = (
+            "Gerando estrutura... (pode levar alguns minutos; "
+            "reasoning alto é limitado a medium nesta etapa)"
+        )
         self.app.page.update()
         
         try:
             orquestrador = OrquestradorMinuta(
                 api_key=self.app.api_key,
                 management_key=self.app.management_key,
-                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
-                reasoning_effort=getattr(self.app, "reasoning_effort", None),
+                modelo=getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL,
+                reasoning_effort=getattr(self.app, "reasoning_minuta", None),
             )
             
             if self.collection_id:
@@ -206,10 +219,26 @@ class AbaMinuta:
                 self.dossie_confirmado
             )
             
-            self._exibir_estrutura()
-            
-            self.btn_gerar_minuta.disabled = False
-            self.texto_progresso.value = "Estrutura gerada! Revise e gere a minuta."
+            self._exibir_estrutura(avisos)
+
+            n_topicos = len(self.estrutura.topicos) if self.estrutura else 0
+            if n_topicos == 0:
+                self.btn_gerar_minuta.disabled = True
+                detalhe = "; ".join(avisos) if avisos else "nenhum tópico retornado"
+                self.texto_progresso.value = (
+                    f"Estrutura vazia — não foi possível listar tópicos ({detalhe})."
+                )
+                self.app.mostrar_erro(
+                    "A estrutura veio vazia. Verifique modelo/reasoning da Minuta "
+                    f"ou tente novamente.\n\n{detalhe}"
+                )
+            else:
+                self.btn_gerar_minuta.disabled = False
+                extra = f" ({len(avisos)} aviso(s))" if avisos else ""
+                self.texto_progresso.value = (
+                    f"Estrutura gerada com {n_topicos} tópico(s)! "
+                    f"Revise e gere a minuta.{extra}"
+                )
             
         except Exception as ex:
             self.app.mostrar_erro(f"Erro ao gerar estrutura: {str(ex)}")
@@ -218,27 +247,56 @@ class AbaMinuta:
             self.progresso.visible = False
             self.app.page.update()
     
-    def _exibir_estrutura(self):
+    def _exibir_estrutura(self, avisos: Optional[list] = None):
         """Exibe estrutura gerada."""
-        if not self.estrutura:
-            return
-        
         self.area_resultado.controls.clear()
-        
+
         self.area_resultado.controls.append(
             ft.Text("Estrutura da Sentença", size=18, weight=ft.FontWeight.BOLD)
         )
-        
-        for topico in self.estrutura.topicos:
-            indent = "  " * (topico.nivel - 1)
+
+        if not self.estrutura or not self.estrutura.topicos:
             self.area_resultado.controls.append(
                 ft.Text(
-                    f"{indent}{topico.ordem}. {topico.titulo}",
-                    size=14 - topico.nivel
+                    "Nenhum tópico para exibir.",
+                    size=13,
+                    color=ft.Colors.ORANGE_800,
                 )
             )
-        
-        self.app.page.update()
+            if avisos:
+                for av in avisos:
+                    self.area_resultado.controls.append(
+                        ft.Text(f"• {av}", size=12, color=ft.Colors.RED_700)
+                    )
+            self.area_resultado.update()
+            return
+
+        for topico in sorted(
+            self.estrutura.topicos,
+            key=lambda t: (t.ordem, t.id),
+        ):
+            indent = "  " * max(0, (topico.nivel or 1) - 1)
+            tamanho = max(11, 14 - max(1, topico.nivel or 1))
+            tipo_txt = f" [{topico.tipo.value}]" if topico.tipo else ""
+            qid_txt = f" ({topico.questao_id})" if topico.questao_id else ""
+            self.area_resultado.controls.append(
+                ft.Text(
+                    f"{indent}{topico.ordem}. {topico.titulo}{tipo_txt}{qid_txt}",
+                    size=tamanho,
+                )
+            )
+
+        if avisos:
+            self.area_resultado.controls.append(ft.Divider())
+            for av in avisos:
+                self.area_resultado.controls.append(
+                    ft.Text(f"Aviso: {av}", size=11, color=ft.Colors.ORANGE_800)
+                )
+
+        try:
+            self.area_resultado.update()
+        except Exception:
+            self.app.page.update()
     
     def _gerar_minuta(self, e):
         """Gera minuta completa."""
@@ -254,8 +312,8 @@ class AbaMinuta:
             orquestrador = OrquestradorMinuta(
                 api_key=self.app.api_key,
                 management_key=self.app.management_key,
-                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
-                reasoning_effort=getattr(self.app, "reasoning_effort", None),
+                modelo=getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL,
+                reasoning_effort=getattr(self.app, "reasoning_minuta", None),
             )
             
             if self.collection_id:

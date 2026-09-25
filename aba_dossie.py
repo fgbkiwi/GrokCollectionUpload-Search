@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 from cartao_caso import CartaoDoCaso
 from dossie_prova import OrquestradorDossie, PersistenciaDossie, DossieProva
+from ui_modelo_reasoning import SeletorModeloReasoning
+from xai_models import DEFAULT_MODEL
 
 
 class AbaDossie:
@@ -18,6 +20,7 @@ class AbaDossie:
         self.dossie_atual: Optional[DossieProva] = None
         self.caminho_autos: Optional[Path] = None
         self.persistencia = PersistenciaDossie()
+        self.seletor_modelo: Optional[SeletorModeloReasoning] = None
     
     def construir(self) -> ft.Container:
         """Constrói a interface da aba."""
@@ -31,6 +34,8 @@ class AbaDossie:
             "Nenhum arquivo selecionado",
             size=14
         )
+
+        self.seletor_modelo = SeletorModeloReasoning(self.app, "dossie")
         
         self.btn_selecionar_autos = ft.ElevatedButton(
             "Escolher Autos (MD)",
@@ -72,10 +77,15 @@ class AbaDossie:
                             ft.Text("Dossiê de Prova", size=20, weight=ft.FontWeight.BOLD),
                             ft.Divider(),
                             self.texto_status_cartao,
-                            ft.Row([
-                                self.btn_selecionar_autos,
-                                self.campo_autos,
-                            ]),
+                            ft.Row(
+                                [
+                                    *self.seletor_modelo.controles(),
+                                    self.btn_selecionar_autos,
+                                    self.campo_autos,
+                                ],
+                                wrap=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
                             ft.Row([
                                 self.btn_montar,
                                 self.btn_confirmar,
@@ -97,13 +107,40 @@ class AbaDossie:
             expand=True,
         )
     
-    def habilitar_montagem(self):
-        """Habilita a montagem após cartão confirmado."""
-        self.texto_status_cartao.value = f"Cartão confirmado: {self.cartao_confirmado.numero_processo or 'processo'}"
+    def habilitar_montagem(self, caminho_autos: Optional[Path] = None):
+        """Habilita a montagem após cartão confirmado.
+
+        Reaproveita o MD usado no Cartão quando o caminho ainda existir.
+        O botão de seleção permanece disponível para trocar o arquivo.
+        """
+        self.texto_status_cartao.value = (
+            f"Cartão confirmado: "
+            f"{self.cartao_confirmado.numero_processo or 'processo'}"
+        )
         self.texto_status_cartao.color = ft.Colors.GREEN
         self.btn_selecionar_autos.disabled = False
+
+        caminho = Path(caminho_autos) if caminho_autos else None
+        if caminho is not None and not caminho.exists():
+            caminho = None
+
+        if caminho is None and self.cartao_confirmado and self.cartao_confirmado.arquivo_origem:
+            candidato = Path(self.cartao_confirmado.arquivo_origem)
+            if candidato.exists():
+                caminho = candidato
+
+        if caminho is not None:
+            self._definir_autos(caminho)
+        else:
+            self.app.page.update()
+
+    def _definir_autos(self, caminho: Path):
+        """Define o arquivo de autos e habilita a montagem."""
+        self.caminho_autos = Path(caminho)
+        self.campo_autos.value = self.caminho_autos.name
+        self.btn_montar.disabled = False
         self.app.page.update()
-    
+
     def _selecionar_autos(self, e):
         """Seleciona arquivo de autos."""
         self.file_picker.pick_files(
@@ -115,15 +152,23 @@ class AbaDossie:
     def _on_autos_selecionados(self, e: ft.FilePickerResultEvent):
         """Callback do FilePicker."""
         if e.files:
-            self.caminho_autos = Path(e.files[0].path)
-            self.campo_autos.value = self.caminho_autos.name
-            self.btn_montar.disabled = False
-            self.app.page.update()
-    
+            self._definir_autos(Path(e.files[0].path))
+
     def _montar_dossie(self, e):
         """Monta o dossiê de prova."""
         if not self.cartao_confirmado or not self.caminho_autos:
             self.app.mostrar_erro("Cartão e autos são necessários")
+            return
+
+        if not self.caminho_autos.exists():
+            self.app.mostrar_erro(
+                f"Arquivo de autos não encontrado:\n{self.caminho_autos}\n"
+                "Selecione o arquivo novamente."
+            )
+            self.btn_montar.disabled = True
+            self.campo_autos.value = "Nenhum arquivo selecionado"
+            self.caminho_autos = None
+            self.app.page.update()
             return
         
         if not self.app.api_key:
@@ -138,8 +183,8 @@ class AbaDossie:
         try:
             orquestrador = OrquestradorDossie(
                 api_key=self.app.api_key,
-                modelo=getattr(self.app, "modelo_grok", None) or "grok-4.6",
-                reasoning_effort=getattr(self.app, "reasoning_effort", None),
+                modelo=getattr(self.app, "modelo_dossie", None) or DEFAULT_MODEL,
+                reasoning_effort=getattr(self.app, "reasoning_dossie", None),
             )
             
             self.dossie_atual, avisos = orquestrador.montar_dossie(
