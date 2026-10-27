@@ -62,6 +62,9 @@ md_output/
 sentencas_md/
 sentencas_md_v2/
 
+# Logs de execução / auditoria
+logs/
+
 # Temporary files
 *.tmp
 *.bak

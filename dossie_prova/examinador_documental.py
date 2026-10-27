@@ -2,109 +2,24 @@
 Examinador de Provas Documentais.
 """
 
-import json
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
+
+from .examinador_base import ExaminadorBase, QuestaoAlvo, ResultadoQuestao
 from .schema import ProvaDocumental
-from xai_reasoning import aplicar_reasoning_effort
 
 
-class ExaminadorDocumental:
+class ExaminadorDocumental(ExaminadorBase):
     """Examina provas documentais dos autos."""
-    
-    def __init__(
-        self,
-        api_key: str,
-        modelo: str = "grok-4.6",
-        reasoning_effort: Optional[str] = None,
-    ):
-        self.api_key = api_key
-        self.modelo = modelo
-        self.reasoning_effort = reasoning_effort
-        self.base_url = "https://api.x.ai/v1"
-    
-    def examinar(
-        self,
-        questao_id: str,
-        questao_titulo: str,
-        conteudo_documental: str,
-        impugnacoes: Optional[List[str]] = None
-    ) -> tuple[List[ProvaDocumental], List[str]]:
-        """
-        Examina documentos relacionados a uma questão.
-        
-        Args:
-            questao_id: ID da questão
-            questao_titulo: Título da questão
-            conteudo_documental: Conteúdo documental em Markdown
-            impugnacoes: Lista de impugnações específicas do cartão
-            
-        Returns:
-            Tupla com (lista de provas documentais, lista de avisos)
-        """
-        import requests
-        
-        prompt = self._construir_prompt(questao_titulo, conteudo_documental, impugnacoes)
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": self.modelo,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self._get_prompt_sistema()
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": 0.1,
-            "response_format": {"type": "json_object"}
-        }
-        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=120
-            )
-            response.raise_for_status()
-            
-            resultado = response.json()
-            conteudo = resultado["choices"][0]["message"]["content"]
-            dados = json.loads(conteudo)
-            
-            provas = []
-            for p in dados.get("provas_documentais", []):
-                try:
-                    prova = ProvaDocumental(**p)
-                    provas.append(prova)
-                except Exception as e:
-                    avisos = dados.get("avisos", [])
-                    avisos.append(f"Erro ao validar prova documental: {e}")
-            
-            from pje_ids import enriquecer_id_em_objetos, normalizar_id_pje
-            for prova in provas:
-                prova.id_pje = normalizar_id_pje(prova.id_pje)
-            enriquecer_id_em_objetos(provas, conteudo_documental)
-            
-            avisos = dados.get("avisos", [])
-            return provas, avisos
-            
-        except Exception as e:
-            return [], [f"Erro ao examinar provas documentais: {str(e)}"]
-    
-    def _get_prompt_sistema(self) -> str:
-        """Retorna o prompt de sistema para o examinador documental."""
+
+    TIPO = "documental"
+    ROTULO_CONTEUDO = "CONTEÚDO DOCUMENTAL DOS AUTOS"
+    CHAVE_PROVAS = "provas_documentais"
+    MODELO_PROVA = ProvaDocumental
+
+    def _regras(self) -> str:
         return """Você é um assistente jurídico especializado em análise de provas documentais trabalhistas.
 
-Sua tarefa é identificar e extrair provas documentais relevantes para uma questão específica.
+Sua tarefa é identificar e extrair provas documentais relevantes para cada questão indicada.
 
 REGRAS DE VALORAÇÃO DOCUMENTAL:
 1. Documento prevalece sobre testemunha, salvo se houver vício ou simulação comprovada
@@ -112,97 +27,49 @@ REGRAS DE VALORAÇÃO DOCUMENTAL:
    e o reclamante alegou a irregularidade, isso configura confissão ficta (art. 341 CPC, art. 167 §1º CC)
 3. Impugnação específica deve ter grau de detalhe equivalente ao alegado
 4. NUNCA invente ID do PJe, número de folhas, horário ou qualquer dado que não esteja no texto fornecido
-5. ID do PJe: string alfanumérica de 7 caracteres (ex.: c7dbfbc), tipicamente no final da linha "Documento assinado eletronicamente por ..., em DD/MM/AAAA, às HH:MM:SS - XXXXXXX". Também "ID XXXXXXX" / "(ID XXXXXXX)". Se não houver, deixe null (NÃO escreva "não informado") e avise
-6. Transcreva literalmente trechos relevantes, não parafrasear
+5. ID do PJe: string alfanumérica de 7 caracteres (ex.: c7dbfbc, 4ac9a65). Aparece somente na última página da peça, nos 7 caracteres finais da linha "Documento assinado eletronicamente por ..., em DD/MM/AAAA, às HH:MM:SS - XXXXXXX". O texto das páginas anteriores da mesma peça pertence a esse ID. Também "ID XXXXXXX" / "(ID XXXXXXX)". Se não houver, deixe null (NÃO escreva "não informado") e avise
+6. Transcreva literalmente trechos relevantes, não parafrasear"""
 
-FORMATO DE SAÍDA (JSON):
-{
-  "provas_documentais": [
-    {
-      "trecho": "texto literal do documento",
-      "id_pje": "c7dbfbc" ou null,
-      "folhas": "fls. XX" ou null,
-      "relevancia": "alta|media|baixa",
-      "favoravel_a": "autor|reu|neutro",
-      "tipo_documento": "tipo do documento",
-      "observacao": "observações sobre valoração, vícios, impugnações"
-    }
-  ],
-  "avisos": ["avisos sobre dados ausentes, conflitos, etc."]
-}"""
-    
-    def _construir_prompt(
-        self,
-        questao_titulo: str,
-        conteudo: str,
-        impugnacoes: Optional[List[str]]
-    ) -> str:
-        """Constrói o prompt para o modelo."""
-        prompt = f"""Analise as provas documentais para a seguinte questão:
+    def _exemplo_item(self) -> str:
+        return """        {
+          "trecho": "texto literal do documento",
+          "id_pje": "c7dbfbc" ou null,
+          "folhas": "fls. XX" ou null,
+          "relevancia": "alta|media|baixa",
+          "favoravel_a": "autor|reu|neutro",
+          "tipo_documento": "tipo do documento",
+          "observacao": "observações sobre valoração, vícios, impugnações"
+        }"""
 
-QUESTÃO: {questao_titulo}
-
-"""
-        
-        if impugnacoes:
-            prompt += f"""IMPUGNAÇÕES ESPECÍFICAS DA DEFESA:
-{chr(10).join(f"- {imp}" for imp in impugnacoes)}
-
-"""
-        
-        prompt += f"""CONTEÚDO DOCUMENTAL DOS AUTOS:
-{conteudo}
-
----
-
-Extraia as provas documentais relevantes para esta questão, seguindo rigorosamente as regras de valoração.
-Retorne JSON válido."""
-        
-        return prompt
-    
     def examinar_em_lotes(
         self,
         questao_id: str,
         questao_titulo: str,
         lotes_documentais: List[str],
         impugnacoes: Optional[List[str]] = None,
-        max_tokens_por_lote: int = 100000
-    ) -> tuple[List[ProvaDocumental], List[str]]:
-        """
-        Examina documentos em lotes quando o conteúdo é muito grande.
-        
-        Args:
-            questao_id: ID da questão
-            questao_titulo: Título da questão
-            lotes_documentais: Lista de blocos de conteúdo documental
-            impugnacoes: Impugnações específicas
-            max_tokens_por_lote: Máximo de tokens por lote (aprox. 4 chars = 1 token)
-            
-        Returns:
-            Tupla com (lista consolidada de provas, lista de avisos)
-        """
-        todas_provas = []
-        todos_avisos = []
-        
-        for i, lote in enumerate(lotes_documentais):
-            avisos_lote = []
-            
-            if len(lote) > max_tokens_por_lote * 4:
-                avisos_lote.append(
-                    f"Lote {i+1} muito grande ({len(lote)} chars), considere particionar mais"
-                )
-            
-            provas, avisos = self.examinar(
-                questao_id,
-                questao_titulo,
-                lote,
-                impugnacoes
-            )
-            
-            todas_provas.extend(provas)
-            todos_avisos.extend(avisos_lote)
-            todos_avisos.extend(avisos)
-        
-        todos_avisos.insert(0, f"Análise documental em {len(lotes_documentais)} lote(s)")
-        
-        return todas_provas, todos_avisos
+    ) -> ResultadoQuestao:
+        """Examina uma questão em vários lotes de conteúdo (compatibilidade)."""
+        resultado = self.examinar_questoes_em_lotes(
+            [(questao_id, questao_titulo)],
+            lotes_documentais,
+            {questao_id: impugnacoes or []},
+        )
+        return resultado[questao_id]
+
+    def examinar_questoes_em_lotes(
+        self,
+        questoes: Sequence[QuestaoAlvo],
+        lotes: List[str],
+        impugnacoes: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, ResultadoQuestao]:
+        """Examina várias questões sobre conteúdo particionado em lotes."""
+        resultado: Dict[str, ResultadoQuestao] = {
+            qid: ([], [f"Análise documental em {len(lotes)} lote(s)"])
+            for qid, _ in questoes
+        }
+        for lote in lotes:
+            parcial = self.examinar_questoes(questoes, lote, impugnacoes)
+            for qid, (provas, avisos) in parcial.items():
+                resultado[qid][0].extend(provas)
+                resultado[qid][1].extend(avisos)
+        return resultado

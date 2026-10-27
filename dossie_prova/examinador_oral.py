@@ -5,110 +5,31 @@ Implementa as regras específicas de valoração de depoimentos conforme
 metodologia do juiz.
 """
 
-import json
-from typing import List, Optional
+from .examinador_base import ExaminadorBase
 from .schema import ProvaOral
-from xai_reasoning import aplicar_reasoning_effort
 
 
-class ExaminadorOral:
+class ExaminadorOral(ExaminadorBase):
     """Examina provas orais dos autos (depoimentos)."""
-    
-    def __init__(
-        self,
-        api_key: str,
-        modelo: str = "grok-4.6",
-        reasoning_effort: Optional[str] = None,
-    ):
-        self.api_key = api_key
-        self.modelo = modelo
-        self.reasoning_effort = reasoning_effort
-        self.base_url = "https://api.x.ai/v1"
-    
-    def examinar(
-        self,
-        questao_id: str,
-        questao_titulo: str,
-        conteudo_oral: str
-    ) -> tuple[List[ProvaOral], List[str]]:
-        """
-        Examina depoimentos relacionados a uma questão.
-        
-        Args:
-            questao_id: ID da questão
-            questao_titulo: Título da questão
-            conteudo_oral: Transcrições de depoimentos em Markdown
-            
-        Returns:
-            Tupla com (lista de provas orais, lista de avisos)
-        """
-        import requests
-        
-        if not conteudo_oral or len(conteudo_oral.strip()) < 50:
-            return [], ["Nenhum conteúdo oral fornecido ou conteúdo muito curto"]
-        
-        prompt = self._construir_prompt(questao_titulo, conteudo_oral)
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": self.modelo,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self._get_prompt_sistema()
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": 0.1,
-            "response_format": {"type": "json_object"}
-        }
-        aplicar_reasoning_effort(payload, self.modelo, self.reasoning_effort)
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=120
-            )
-            response.raise_for_status()
-            
-            resultado = response.json()
-            conteudo = resultado["choices"][0]["message"]["content"]
-            dados = json.loads(conteudo)
-            
-            provas = []
-            for p in dados.get("provas_orais", []):
-                try:
-                    prova = ProvaOral(**p)
-                    provas.append(prova)
-                except Exception as e:
-                    avisos = dados.get("avisos", [])
-                    avisos.append(f"Erro ao validar prova oral: {e}")
-            
-            from pje_ids import enriquecer_id_em_objetos, normalizar_id_pje
-            for prova in provas:
-                prova.id_pje = normalizar_id_pje(prova.id_pje)
-            enriquecer_id_em_objetos(provas, conteudo_oral)
-            
-            avisos = dados.get("avisos", [])
-            return provas, avisos
-            
-        except Exception as e:
-            return [], [f"Erro ao examinar provas orais: {str(e)}"]
-    
-    def _get_prompt_sistema(self) -> str:
-        """Retorna o prompt de sistema com as regras de valoração oral."""
+
+    TIPO = "oral"
+    ROTULO_CONTEUDO = "TRANSCRIÇÕES DE DEPOIMENTOS E ATAS DE AUDIÊNCIA"
+    CHAVE_PROVAS = "provas_orais"
+    MODELO_PROVA = ProvaOral
+    MIN_CHARS = 50
+    AVISO_SEM_CONTEUDO = "Nenhum conteúdo oral fornecido ou conteúdo muito curto"
+
+    def _instrucao_final(self) -> str:
+        return (
+            "Extraia as provas orais relevantes para cada questão, aplicando RIGOROSAMENTE "
+            "as regras de valoração oral. Marque como desconsiderada qualquer prova que "
+            "viole as regras e explique o motivo."
+        )
+
+    def _regras(self) -> str:
         return """Você é um assistente jurídico especializado em análise de provas orais trabalhistas.
 
-Sua tarefa é identificar e extrair depoimentos relevantes, aplicando rigorosamente as REGRAS DE VALORAÇÃO ORAL.
+Sua tarefa é identificar e extrair depoimentos relevantes para cada questão indicada, aplicando rigorosamente as REGRAS DE VALORAÇÃO ORAL.
 
 REGRAS DE VALORAÇÃO ORAL (MÉTODO DO JUIZ):
 
@@ -147,38 +68,18 @@ REGRAS DE VALORAÇÃO ORAL (MÉTODO DO JUIZ):
    - Ex: "Trabalhava das 8h às 18h sem pausa [00:03:45]"
    - NUNCA invente ID, folha, horário ou fala
 
-FORMATO DE SAÍDA (JSON):
-{
-  "provas_orais": [
-    {
-      "trecho": "texto literal com [timestamp] se existir",
-      "id_pje": "c7dbfbc" ou null,
-      "folhas": "fls. XX" ou null,
-      "relevancia": "alta|media|baixa",
-      "favoravel_a": "autor|reu|neutro",
-      "tipo_depoente": "reclamante|reclamada|preposto|testemunha_autor|testemunha_reu",
-      "nome_depoente": "nome se identificado",
-      "observacao": "análise da valoração conforme as regras",
-      "desconsiderada": true ou false,
-      "motivo_desconsideracao": "motivo se desconsiderada"
-    }
-  ],
-  "avisos": ["avisos sobre valoração, conflitos, etc."]
-}
-
 IMPORTANTE: Seja RIGOROSO na aplicação das regras. Melhor ter menos provas consistentes do que provas frágeis."""
-    
-    def _construir_prompt(self, questao_titulo: str, conteudo: str) -> str:
-        """Constrói o prompt para o modelo."""
-        return f"""Analise os depoimentos para a seguinte questão:
 
-QUESTÃO: {questao_titulo}
-
-TRANSCRIÇÕES DE DEPOIMENTOS:
-{conteudo}
-
----
-
-Extraia as provas orais relevantes para esta questão, aplicando RIGOROSAMENTE as regras de valoração oral.
-Marque como desconsiderada qualquer prova que viole as regras e explique o motivo.
-Retorne JSON válido."""
+    def _exemplo_item(self) -> str:
+        return """        {
+          "trecho": "texto literal com [timestamp] se existir",
+          "id_pje": "c7dbfbc" ou null,
+          "folhas": "fls. XX" ou null,
+          "relevancia": "alta|media|baixa",
+          "favoravel_a": "autor|reu|neutro",
+          "tipo_depoente": "reclamante|reclamada|preposto|testemunha_autor|testemunha_reu",
+          "nome_depoente": "nome se identificado",
+          "observacao": "análise da valoração conforme as regras",
+          "desconsiderada": true ou false,
+          "motivo_desconsideracao": "motivo se desconsiderada"
+        }"""

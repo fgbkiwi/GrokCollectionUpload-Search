@@ -65,7 +65,7 @@ ID 11111111, fls. 60.
 
 def test_examinador_oral_descarta_depoimento_autointeressado():
     """Testa se examinador oral descarta depoimento de parte favorável a si."""
-    with patch('dossie_prova.examinador_oral.requests.post') as mock_post:
+    with patch('dossie_prova.examinador_base.requests.post') as mock_post:
         mock_response = Mock()
         mock_response.json.return_value = {
             "choices": [{
@@ -95,7 +95,7 @@ def test_examinador_oral_descarta_depoimento_autointeressado():
         provas, avisos = examinador.examinar(
             "Q1",
             "Horas extras",
-            "Depoimento reclamante: Trabalhei até tarde"
+            "Depoimento do reclamante: trabalhei até tarde todos os dias da semana"
         )
         
         assert len(provas) == 1
@@ -105,7 +105,7 @@ def test_examinador_oral_descarta_depoimento_autointeressado():
 
 def test_dossie_funde_lotes_documentais():
     """Testa se dossiê funde corretamente lotes documentais."""
-    with patch('dossie_prova.examinador_documental.requests.post') as mock_post:
+    with patch('dossie_prova.examinador_base.requests.post') as mock_post:
         mock_response = Mock()
         mock_response.json.return_value = {
             "choices": [{

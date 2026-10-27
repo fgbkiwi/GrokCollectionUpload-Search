@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 from cartao_caso import CartaoDoCaso
 from dossie_prova import OrquestradorDossie, PersistenciaDossie, DossieProva
+from log_execucao import FASE, etapa
 from ui_modelo_reasoning import SeletorModeloReasoning
 from xai_models import DEFAULT_MODEL
 
@@ -180,31 +181,43 @@ class AbaDossie:
         self.btn_montar.disabled = True
         self.app.page.update()
         
-        try:
-            orquestrador = OrquestradorDossie(
-                api_key=self.app.api_key,
-                modelo=getattr(self.app, "modelo_dossie", None) or DEFAULT_MODEL,
-                reasoning_effort=getattr(self.app, "reasoning_dossie", None),
-            )
-            
-            self.dossie_atual, avisos = orquestrador.montar_dossie(
-                self.cartao_confirmado,
-                self.caminho_autos,
-                callback_progresso=self._atualizar_progresso
-            )
-            
-            self._exibir_dossie()
-            
-            self.btn_confirmar.disabled = False
-            self.texto_progresso.value = "Dossiê montado! Revise e confirme."
-            
-        except Exception as ex:
-            self.app.mostrar_erro(f"Erro ao montar dossiê: {str(ex)}")
-            self.texto_progresso.value = f"Erro: {str(ex)}"
-        finally:
-            self.progresso.visible = False
-            self.btn_montar.disabled = False
-            self.app.page.update()
+        modelo = getattr(self.app, "modelo_dossie", None) or DEFAULT_MODEL
+        reasoning = getattr(self.app, "reasoning_dossie", None)
+        with etapa(
+            "dossie",
+            categoria=FASE,
+            arquivo=self.caminho_autos.name,
+            modelo=modelo,
+            reasoning=reasoning,
+            questoes=sum(1 for q in self.cartao_confirmado.questoes if q.mencionar_na_minuta),
+        ) as fase:
+            try:
+                orquestrador = OrquestradorDossie(
+                    api_key=self.app.api_key,
+                    modelo=modelo,
+                    reasoning_effort=reasoning,
+                )
+                
+                self.dossie_atual, avisos = orquestrador.montar_dossie(
+                    self.cartao_confirmado,
+                    self.caminho_autos,
+                    callback_progresso=self._atualizar_progresso
+                )
+                
+                with etapa("dossie.exibicao_ui"):
+                    self._exibir_dossie()
+                
+                self.btn_confirmar.disabled = False
+                self.texto_progresso.value = "Dossiê montado! Revise e confirme."
+                
+            except Exception as ex:
+                fase.marcar_erro(str(ex))
+                self.app.mostrar_erro(f"Erro ao montar dossiê: {str(ex)}")
+                self.texto_progresso.value = f"Erro: {str(ex)}"
+            finally:
+                self.progresso.visible = False
+                self.btn_montar.disabled = False
+                self.app.page.update()
     
     def _atualizar_progresso(self, mensagem: str, progresso: float):
         """Atualiza progresso."""

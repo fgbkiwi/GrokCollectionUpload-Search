@@ -7,6 +7,7 @@ Funcionalidades:
 - Interface gráfica para interação com modelo Grok
 - Busca híbrida em xAI Collections com filtros de metadados
 - Configurações persistentes (API keys, modelo, temperature)
+- Lista de modelos das configurações atualizada em tempo real pela API xAI
 - Anexar arquivos ao contexto do chat
 - Copiar chat completo para clipboard
 - Suporte a busca em tempo real (Web e X)
@@ -20,8 +21,9 @@ import flet as ft
 import json
 import requests
 import os
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import pyperclip
 
@@ -74,6 +76,85 @@ class ConfigManager:
         """Define valor de configuração."""
         self.config[key] = value
         self.save_config()
+
+
+def preparar_tools(tools: Optional[List[Dict]]) -> Tuple[Optional[List[Dict]], bool]:
+    """Converte a busca em collection para o formato aceito pela API.
+
+    Chat Completions só aceita tools ``function`` e ``live_search``.
+    A busca em collection usa ``file_search`` em ``POST /v1/responses``.
+    """
+    if not tools:
+        return None, False
+
+    convertidas: List[Dict] = []
+    usar_responses = False
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        tipo = tool.get("type")
+        if tipo == "collection_search":
+            colecao = tool.get("collection_id")
+            ids = [colecao] if isinstance(colecao, str) and colecao else []
+            ids.extend(tool.get("vector_store_ids") or [])
+            parametros = tool.get("search_parameters") or {}
+            limite = parametros.get("top_k") or tool.get("max_num_results") or 5
+            convertidas.append({
+                "type": "file_search",
+                "vector_store_ids": ids,
+                "max_num_results": limite,
+            })
+            usar_responses = True
+            continue
+        convertidas.append(tool)
+        if tipo == "file_search":
+            usar_responses = True
+    return convertidas or None, usar_responses
+
+
+def extrair_texto_resposta(data: Dict) -> str:
+    """Lê o texto do assistente em Chat Completions ou na Responses API."""
+    if not isinstance(data, dict):
+        return ""
+
+    choices = data.get("choices")
+    if choices:
+        message = (choices[0] or {}).get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            partes = [
+                str(bloco.get("text"))
+                for bloco in content
+                if isinstance(bloco, dict) and bloco.get("text")
+            ]
+            return "\n".join(partes).strip()
+
+    partes: List[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for bloco in item.get("content") or []:
+            if isinstance(bloco, dict) and bloco.get("text"):
+                partes.append(str(bloco["text"]))
+    return "\n".join(partes).strip()
+
+
+def normalizar_resposta_chat(data: Dict) -> Dict:
+    """Devolve o formato de chat completion usado pela interface."""
+    if isinstance(data, dict) and data.get("choices"):
+        return data
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": extrair_texto_resposta(data),
+                }
+            }
+        ]
+    }
 
 
 class XAIClient:
@@ -154,30 +235,48 @@ class XAIClient:
             "temperature": temperature,
         }
         
-        if tools:
-            payload["tools"] = tools
-        
         if stream:
             payload["stream"] = True
 
+        tools_api, usar_responses = preparar_tools(tools)
+        if tools_api:
+            payload["tools"] = tools_api
+
         aplicar_reasoning_effort(payload, model, reasoning_effort)
+
+        if usar_responses:
+            payload["input"] = payload.pop("messages")
+            url = f"{self.base_url}/responses"
+        else:
+            url = f"{self.base_url}/chat/completions"
         
         try:
             response = requests.post(
-                f"{self.base_url}/chat/completions",
+                url,
                 headers=self.headers,
                 json=payload,
-                timeout=60,
+                timeout=120 if usar_responses else 60,
                 stream=stream
             )
-            response.raise_for_status()
-            
-            if stream:
-                return response  # Retorna objeto response para streaming
-            else:
-                return response.json()
-        except Exception as e:
-            raise Exception(f"Erro na requisição: {str(e)}")
+        except requests.RequestException as e:
+            detalhe = ""
+            resposta = getattr(e, "response", None)
+            if resposta is not None and resposta.text:
+                detalhe = " " + resposta.text.strip().replace("\n", " ")[:500]
+            raise Exception(f"Erro na requisição: {e}.{detalhe}") from e
+
+        if not response.ok:
+            detalhe = (response.text or "").strip().replace("\n", " ")
+            if len(detalhe) > 500:
+                detalhe = detalhe[:500] + "..."
+            raise Exception(
+                f"Erro na requisição: {response.status_code} {response.reason} "
+                f"for url: {response.url}. {detalhe}"
+            )
+
+        if stream:
+            return response  # Retorna objeto response para streaming
+        return normalizar_resposta_chat(response.json())
 
 
 class PrecedenteSearchApp:
@@ -473,15 +572,12 @@ class PrecedenteSearchApp:
         if not collection_id:
             return None
         
-        # Collection Search Tool conforme documentação xAI
+        # file_search é o formato atual da busca em Collections (Responses API).
         tools = [
             {
-                "type": "collection_search",
-                "collection_id": collection_id,
-                "search_parameters": {
-                    "search_type": "hybrid",  # Busca híbrida (semântica + keywords)
-                    "top_k": 5,  # Retorna top 5 resultados mais relevantes
-                }
+                "type": "file_search",
+                "vector_store_ids": [collection_id],
+                "max_num_results": 5,
             }
         ]
         
@@ -590,6 +686,12 @@ class PrecedenteSearchApp:
     
     def open_settings(self, e):
         """Abre diálogo de configurações."""
+        from xai_models import (
+            DEFAULT_MODEL,
+            FALLBACK_MODELS,
+            listar_modelos_para_ui,
+            rotulo_modelo,
+        )
         from xai_reasoning import (
             LABELS_REASONING,
             DEFAULT_REASONING_EFFORT,
@@ -614,18 +716,21 @@ class PrecedenteSearchApp:
             can_reveal_password=True,
             width=500,
         )
-        
+
+        modelo_inicial = self.config_manager.get("model") or DEFAULT_MODEL
+        opcoes_iniciais = list(FALLBACK_MODELS)
+        if modelo_inicial not in opcoes_iniciais:
+            opcoes_iniciais = [modelo_inicial, *opcoes_iniciais]
+
         model_dropdown = ft.Dropdown(
             label="Modelo",
-            value=self.config_manager.get("model"),
+            value=modelo_inicial,
             options=[
-                ft.dropdown.Option("grok-4.6", "Grok 4.6 (Recomendado)"),
-                ft.dropdown.Option("grok-4.5", "Grok 4.5"),
-                ft.dropdown.Option("grok-4.3", "Grok 4.3"),
-                ft.dropdown.Option("grok-4.20-0309-non-reasoning", "Grok 4.20 Non-Reasoning"),
+                ft.dropdown.Option(m, rotulo_modelo(m)) for m in opcoes_iniciais
             ],
             width=500,
         )
+        modelos_status = ft.Text(size=12, color=ft.Colors.GREY_700)
 
         reasoning_dropdown = ft.Dropdown(
             label="Nível de reasoning",
@@ -633,8 +738,12 @@ class PrecedenteSearchApp:
         )
         reasoning_hint = ft.Text(size=12, color=ft.Colors.GREY_700)
 
+        dialogo_ativo = {"ok": True}
+        carga_modelos = {"geracao": 0}
+        debounce_modelos: Dict[str, Optional[threading.Timer]] = {"timer": None}
+
         def sync_reasoning_options(_e=None):
-            modelo = model_dropdown.value or "grok-4.6"
+            modelo = model_dropdown.value or DEFAULT_MODEL
             niveis = niveis_reasoning_para_modelo(modelo)
             if not niveis:
                 reasoning_dropdown.options = [
@@ -649,10 +758,12 @@ class PrecedenteSearchApp:
                     ft.dropdown.Option(nivel, LABELS_REASONING.get(nivel, nivel))
                     for nivel in niveis
                 ]
-                reasoning_dropdown.value = normalizar_reasoning_effort(
-                    modelo,
-                    self.config_manager.get("reasoning_effort") or DEFAULT_REASONING_EFFORT,
+                preferido = (
+                    reasoning_dropdown.value
+                    or self.config_manager.get("reasoning_effort")
+                    or DEFAULT_REASONING_EFFORT
                 )
+                reasoning_dropdown.value = normalizar_reasoning_effort(modelo, preferido)
                 reasoning_hint.value = (
                     "Controla a profundidade de raciocínio (latência × qualidade)."
                 )
@@ -660,6 +771,80 @@ class PrecedenteSearchApp:
                 self.page.update()
             except Exception:
                 pass
+
+        def aplicar_lista_modelos(modelos: List[str], msg: str) -> None:
+            """Substitui as opções do dropdown e preserva a seleção atual."""
+            atual = model_dropdown.value or modelo_inicial
+            ids = list(modelos)
+            if atual and atual not in ids:
+                ids = [atual, *ids]
+            vindos_da_api = set(modelos)
+            model_dropdown.options = [
+                ft.dropdown.Option(
+                    m,
+                    rotulo_modelo(m) if m in vindos_da_api else f"{m} (atual)",
+                )
+                for m in ids
+            ]
+            if atual in ids:
+                model_dropdown.value = atual
+            elif ids:
+                model_dropdown.value = ids[0]
+            else:
+                model_dropdown.value = DEFAULT_MODEL
+            modelos_status.value = msg
+            sync_reasoning_options()
+
+        def carregar_modelos(api_key: str) -> None:
+            """Consulta a xAI e atualiza o dropdown sem travar a interface."""
+            if not dialogo_ativo["ok"]:
+                return
+            key = (api_key or "").strip()
+            carga_modelos["geracao"] += 1
+            geracao = carga_modelos["geracao"]
+
+            if not key:
+                modelos, msg = listar_modelos_para_ui("")
+                if dialogo_ativo["ok"] and geracao == carga_modelos["geracao"]:
+                    aplicar_lista_modelos(modelos, msg)
+                return
+
+            modelos_status.value = "Consultando modelos na xAI..."
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+            def worker() -> None:
+                modelos, msg = listar_modelos_para_ui(key)
+                if not dialogo_ativo["ok"] or geracao != carga_modelos["geracao"]:
+                    return
+                aplicar_lista_modelos(modelos, msg)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def agendar_modelos(api_key: str) -> None:
+            timer = debounce_modelos["timer"]
+            if timer is not None:
+                timer.cancel()
+            timer = threading.Timer(0.5, lambda: carregar_modelos(api_key))
+            timer.daemon = True
+            debounce_modelos["timer"] = timer
+            timer.start()
+
+        def ao_mudar_api_key(_e=None) -> None:
+            agendar_modelos(api_key_field.value or "")
+
+        def ao_confirmar_api_key(_e=None) -> None:
+            timer = debounce_modelos["timer"]
+            if timer is not None:
+                timer.cancel()
+                debounce_modelos["timer"] = None
+            carregar_modelos(api_key_field.value or "")
+
+        api_key_field.on_change = ao_mudar_api_key
+        api_key_field.on_blur = ao_confirmar_api_key
+        api_key_field.on_submit = ao_confirmar_api_key
 
         model_dropdown.on_change = sync_reasoning_options
         sync_reasoning_options()
@@ -702,12 +887,24 @@ class PrecedenteSearchApp:
             value=self.config_manager.get("theme_dark"),
         )
         
+        def encerrar_consulta_modelos(_e=None) -> None:
+            dialogo_ativo["ok"] = False
+            timer = debounce_modelos["timer"]
+            if timer is not None:
+                timer.cancel()
+                debounce_modelos["timer"] = None
+
+        def cancelar_settings(_e=None) -> None:
+            encerrar_consulta_modelos()
+            self.close_dialog(settings_dialog)
+
         def save_settings(e):
             """Salva configurações e fecha diálogo."""
+            encerrar_consulta_modelos()
             self.config_manager.set("management_key", management_key_field.value)
             self.config_manager.set("api_key", api_key_field.value)
             self.config_manager.set("model", model_dropdown.value)
-            modelo = model_dropdown.value or "grok-4.6"
+            modelo = model_dropdown.value or DEFAULT_MODEL
             if modelo_suporta_reasoning(modelo):
                 self.config_manager.set(
                     "reasoning_effort",
@@ -741,6 +938,7 @@ class PrecedenteSearchApp:
                     management_key_field,
                     api_key_field,
                     model_dropdown,
+                    modelos_status,
                     reasoning_dropdown,
                     reasoning_hint,
                     ft.Row([ft.Text("Temperature:"), temperature_slider]),
@@ -755,12 +953,14 @@ class PrecedenteSearchApp:
                 height=600,
             ),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda _: self.close_dialog(settings_dialog)),
+                ft.TextButton("Cancelar", on_click=cancelar_settings),
                 ft.ElevatedButton("Salvar", on_click=save_settings),
             ],
+            on_dismiss=encerrar_consulta_modelos,
         )
         
         self.open_dialog(settings_dialog)
+        carregar_modelos(api_key_field.value or "")
 
     def open_dialog(self, dialog):
         """Abre um diálogo de forma compatível."""

@@ -3,6 +3,8 @@ Aba da Minuta.
 """
 
 import flet as ft
+from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Any
 from cartao_caso import CartaoDoCaso
 from dossie_prova import DossieProva
@@ -13,6 +15,7 @@ from minuta import (
     MinutaCompleta,
     MinutaTopico,
 )
+from log_execucao import FASE, etapa
 from ui_modelo_reasoning import SeletorModeloReasoning
 from xai_models import DEFAULT_MODEL
 
@@ -28,6 +31,7 @@ class AbaMinuta:
         self.collection_id: Optional[str] = None
         self.persistencia = PersistenciaMinuta()
         self.seletor_modelo: Optional[SeletorModeloReasoning] = None
+        self._ultimo_md_parcial: Optional[Path] = None
     
     def construir(self) -> ft.Container:
         """Constrói a interface da aba."""
@@ -70,6 +74,12 @@ class AbaMinuta:
             disabled=True
         )
         
+        self.checkbox_previa = ft.Checkbox(
+            label="Gerar prévia (plano) antes da redação — dobra as chamadas por tópico",
+            value=bool(getattr(self.app, "gerar_previa_minuta", False)),
+            on_change=self._ao_mudar_previa,
+        )
+        
         self.btn_gerar_minuta = ft.ElevatedButton(
             "Gerar Minuta",
             icon=ft.Icons.CREATE,
@@ -98,6 +108,7 @@ class AbaMinuta:
                                 self.campo_top_k,
                                 self.dropdown_mode,
                             ]),
+                            self.checkbox_previa,
                             ft.Row(
                                 [
                                     *self.seletor_modelo.controles(),
@@ -203,49 +214,62 @@ class AbaMinuta:
         )
         self.app.page.update()
         
-        try:
-            orquestrador = OrquestradorMinuta(
-                api_key=self.app.api_key,
-                management_key=self.app.management_key,
-                modelo=getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL,
-                reasoning_effort=getattr(self.app, "reasoning_minuta", None),
-            )
-            
-            if self.collection_id:
-                orquestrador.configurar_busca(self.collection_id)
-            
-            self.estrutura, avisos = orquestrador.gerar_estrutura(
-                self.cartao_confirmado,
-                self.dossie_confirmado
-            )
-            
-            self._exibir_estrutura(avisos)
+        modelo = getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL
+        reasoning = getattr(self.app, "reasoning_minuta", None)
+        with etapa(
+            "estrutura",
+            categoria=FASE,
+            modelo=modelo,
+            reasoning=reasoning,
+            collection_id=self.collection_id,
+        ) as fase:
+            try:
+                orquestrador = OrquestradorMinuta(
+                    api_key=self.app.api_key,
+                    management_key=self.app.management_key,
+                    modelo=modelo,
+                    reasoning_effort=reasoning,
+                )
+                
+                if self.collection_id:
+                    orquestrador.configurar_busca(self.collection_id)
+                
+                self.estrutura, avisos = orquestrador.gerar_estrutura(
+                    self.cartao_confirmado,
+                    self.dossie_confirmado
+                )
+                
+                with etapa("estrutura.exibicao_ui"):
+                    self._exibir_estrutura(avisos)
 
-            n_topicos = len(self.estrutura.topicos) if self.estrutura else 0
-            if n_topicos == 0:
-                self.btn_gerar_minuta.disabled = True
-                detalhe = "; ".join(avisos) if avisos else "nenhum tópico retornado"
-                self.texto_progresso.value = (
-                    f"Estrutura vazia — não foi possível listar tópicos ({detalhe})."
-                )
-                self.app.mostrar_erro(
-                    "A estrutura veio vazia. Verifique modelo/reasoning da Minuta "
-                    f"ou tente novamente.\n\n{detalhe}"
-                )
-            else:
-                self.btn_gerar_minuta.disabled = False
-                extra = f" ({len(avisos)} aviso(s))" if avisos else ""
-                self.texto_progresso.value = (
-                    f"Estrutura gerada com {n_topicos} tópico(s)! "
-                    f"Revise e gere a minuta.{extra}"
-                )
-            
-        except Exception as ex:
-            self.app.mostrar_erro(f"Erro ao gerar estrutura: {str(ex)}")
-            self.texto_progresso.value = f"Erro: {str(ex)}"
-        finally:
-            self.progresso.visible = False
-            self.app.page.update()
+                n_topicos = len(self.estrutura.topicos) if self.estrutura else 0
+                fase.atualizar(topicos=n_topicos, avisos=len(avisos))
+                if n_topicos == 0:
+                    self.btn_gerar_minuta.disabled = True
+                    detalhe = "; ".join(avisos) if avisos else "nenhum tópico retornado"
+                    fase.marcar_erro(f"Estrutura vazia: {detalhe}")
+                    self.texto_progresso.value = (
+                        f"Estrutura vazia — não foi possível listar tópicos ({detalhe})."
+                    )
+                    self.app.mostrar_erro(
+                        "A estrutura veio vazia. Verifique modelo/reasoning da Minuta "
+                        f"ou tente novamente.\n\n{detalhe}"
+                    )
+                else:
+                    self.btn_gerar_minuta.disabled = False
+                    extra = f" ({len(avisos)} aviso(s))" if avisos else ""
+                    self.texto_progresso.value = (
+                        f"Estrutura gerada com {n_topicos} tópico(s)! "
+                        f"Revise e gere a minuta.{extra}"
+                    )
+                
+            except Exception as ex:
+                fase.marcar_erro(str(ex))
+                self.app.mostrar_erro(f"Erro ao gerar estrutura: {str(ex)}")
+                self.texto_progresso.value = f"Erro: {str(ex)}"
+            finally:
+                self.progresso.visible = False
+                self.app.page.update()
     
     def _exibir_estrutura(self, avisos: Optional[list] = None):
         """Exibe estrutura gerada."""
@@ -306,81 +330,139 @@ class AbaMinuta:
         
         self.progresso.visible = True
         self.texto_progresso.value = "Gerando minuta..."
+        self._ultimo_md_parcial = None
         self.app.page.update()
         
-        try:
-            orquestrador = OrquestradorMinuta(
-                api_key=self.app.api_key,
-                management_key=self.app.management_key,
-                modelo=getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL,
-                reasoning_effort=getattr(self.app, "reasoning_minuta", None),
-            )
-            
-            if self.collection_id:
-                orquestrador.configurar_busca(self.collection_id)
-            
-            criterios = {
-                "top_k": int(self.campo_top_k.value or "5"),
-                "retrieval_mode": self.dropdown_mode.value,
-            }
-            
-            minutas_definitivas = []
-            
-            for i, topico in enumerate(self.estrutura.topicos):
-                self.texto_progresso.value = f"Gerando minuta {i+1}/{len(self.estrutura.topicos)}..."
+        modelo = getattr(self.app, "modelo_minuta", None) or DEFAULT_MODEL
+        reasoning = getattr(self.app, "reasoning_minuta", None)
+        gerar_previa = bool(self.checkbox_previa.value)
+        total_topicos = len(self.estrutura.topicos)
+        with etapa(
+            "minuta",
+            categoria=FASE,
+            modelo=modelo,
+            reasoning=reasoning,
+            collection_id=self.collection_id,
+            topicos=total_topicos,
+            gerar_previa=gerar_previa,
+        ) as fase:
+            try:
+                orquestrador = OrquestradorMinuta(
+                    api_key=self.app.api_key,
+                    management_key=self.app.management_key,
+                    modelo=modelo,
+                    reasoning_effort=reasoning,
+                )
+                
+                if self.collection_id:
+                    orquestrador.configurar_busca(self.collection_id)
+                
+                criterios = {
+                    "top_k": int(self.campo_top_k.value or "5"),
+                    "retrieval_mode": self.dropdown_mode.value,
+                }
+                fase.atualizar(**criterios)
+                
+                minuta_completa = MinutaCompleta(
+                    cartao_origem=self.cartao_confirmado.arquivo_origem,
+                    dossie_origem=self.dossie_confirmado.arquivo_autos,
+                    collection_id=self.collection_id,
+                    estrutura=self.estrutura,
+                    criterios_busca=criterios,
+                    concluida=False,
+                )
+                nome_base = (
+                    f"minuta_{Path(self.cartao_confirmado.arquivo_origem).stem}"
+                    f"_{datetime.now():%Y%m%d_%H%M%S}"
+                )
+                
+                for i, topico in enumerate(self.estrutura.topicos):
+                    self.texto_progresso.value = f"Gerando minuta {i+1}/{total_topicos}..."
+                    self.app.page.update()
+                    
+                    with etapa(
+                        "minuta.topico",
+                        topico_id=topico.id,
+                        topico=topico.titulo,
+                        indice=f"{i + 1}/{total_topicos}",
+                    ):
+                        minuta_previa = None
+                        if gerar_previa:
+                            minuta_previa, _ = orquestrador.gerar_minuta_previa(
+                                topico,
+                                self.cartao_confirmado,
+                                self.dossie_confirmado
+                            )
+                            minuta_previa.aprovada = True
+                            minuta_completa.minutas_previas.append(minuta_previa)
+                        
+                        minuta_def, _ = orquestrador.gerar_minuta_definitiva(
+                            topico,
+                            minuta_previa,
+                            self.cartao_confirmado,
+                            self.dossie_confirmado,
+                            criterios
+                        )
+                    
+                    minuta_completa.minutas_definitivas.append(minuta_def)
+                    minuta_completa.minuta_final_md = self._montar_markdown(
+                        minuta_completa.minutas_definitivas
+                    )
+                    with etapa("minuta.persistencia_parcial", topicos_salvos=i + 1):
+                        caminho_json, caminho_md = self._salvar_minuta(
+                            minuta_completa, nome_base
+                        )
+                
+                minuta_completa.concluida = True
+                with etapa("minuta.persistencia"):
+                    caminho_json, caminho_md = self._salvar_minuta(minuta_completa, nome_base)
+                minuta_final_md = minuta_completa.minuta_final_md or ""
+                
+                self.texto_progresso.value = f"Minuta salva em:\n{caminho_md}"
+                
+                self.area_resultado.controls.clear()
+                self.area_resultado.controls.append(
+                    ft.Text("Minuta Gerada", size=18, weight=ft.FontWeight.BOLD)
+                )
+                self.area_resultado.controls.append(
+                    ft.Text(minuta_final_md[:2000] + "...", size=12)
+                )
+                
+                self.app.mostrar_info(f"Minuta salva:\nJSON: {caminho_json}\nMD: {caminho_md}")
+                
+            except Exception as ex:
+                fase.marcar_erro(str(ex))
+                parcial = (
+                    f"\n\nTópicos já concluídos foram salvos em:\n{self._ultimo_md_parcial}"
+                    if self._ultimo_md_parcial else ""
+                )
+                self.app.mostrar_erro(f"Erro ao gerar minuta: {str(ex)}{parcial}")
+                self.texto_progresso.value = f"Erro: {str(ex)}"
+            finally:
+                self.progresso.visible = False
                 self.app.page.update()
-                
-                minuta_previa, _ = orquestrador.gerar_minuta_previa(
-                    topico,
-                    self.cartao_confirmado,
-                    self.dossie_confirmado
-                )
-                
-                minuta_previa.aprovada = True
-                
-                minuta_def, _ = orquestrador.gerar_minuta_definitiva(
-                    topico,
-                    minuta_previa,
-                    self.cartao_confirmado,
-                    self.dossie_confirmado,
-                    criterios
-                )
-                
-                minutas_definitivas.append(minuta_def)
-            
-            minuta_final_md = "\n\n".join([
-                f"## {m.titulo}\n\n{m.conteudo}"
-                for m in minutas_definitivas
-            ])
-            
-            minuta_completa = MinutaCompleta(
-                cartao_origem=self.cartao_confirmado.arquivo_origem,
-                dossie_origem=self.dossie_confirmado.arquivo_autos,
-                collection_id=self.collection_id,
-                estrutura=self.estrutura,
-                minutas_definitivas=minutas_definitivas,
-                minuta_final_md=minuta_final_md,
-                criterios_busca=criterios
-            )
-            
-            caminho_json = self.persistencia.salvar(minuta_completa)
-            caminho_md = self.persistencia.salvar_markdown(minuta_completa)
-            
-            self.texto_progresso.value = f"Minuta salva em:\n{caminho_md}"
-            
-            self.area_resultado.controls.clear()
-            self.area_resultado.controls.append(
-                ft.Text("Minuta Gerada", size=18, weight=ft.FontWeight.BOLD)
-            )
-            self.area_resultado.controls.append(
-                ft.Text(minuta_final_md[:2000] + "...", size=12)
-            )
-            
-            self.app.mostrar_info(f"Minuta salva:\nJSON: {caminho_json}\nMD: {caminho_md}")
-            
-        except Exception as ex:
-            self.app.mostrar_erro(f"Erro ao gerar minuta: {str(ex)}")
-            self.texto_progresso.value = f"Erro: {str(ex)}"
-        finally:
-            self.progresso.visible = False
-            self.app.page.update()
+
+    @staticmethod
+    def _montar_markdown(minutas_definitivas: list) -> str:
+        """Junta os tópicos; tópicos que falharam ficam sinalizados na própria minuta."""
+        partes = []
+        for m in minutas_definitivas:
+            conteudo = (m.conteudo or "").strip()
+            if not conteudo:
+                motivo = "; ".join(m.avisos_validacao) or "resposta vazia da API"
+                conteudo = f"> **[Tópico não gerado — {motivo}]**"
+            partes.append(f"## {m.titulo}\n\n{conteudo}")
+        return "\n\n".join(partes)
+
+    def _salvar_minuta(self, minuta: MinutaCompleta, nome_base: str):
+        """Grava JSON e MD com nome fixo (sobrescreve a cada tópico concluído)."""
+        caminho_json = self.persistencia.salvar(minuta, f"{nome_base}.json")
+        caminho_md = self.persistencia.salvar_markdown(minuta, f"{nome_base}.md")
+        self._ultimo_md_parcial = caminho_md
+        return caminho_json, caminho_md
+
+    def _ao_mudar_previa(self, e):
+        self.app.gerar_previa_minuta = bool(self.checkbox_previa.value)
+        salvar = getattr(self.app, "salvar_config_persistida", None)
+        if callable(salvar):
+            salvar()

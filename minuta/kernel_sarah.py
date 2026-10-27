@@ -24,7 +24,7 @@ class KernelSarah:
 FATO, DATA, VALOR, ID DO PJE, DEPOIMENTO QUE NÃO ESTEJA NO CARTÃO + DOSSIÊ + PRECEDENTES RECUPERADOS NÃO EXISTE.
 
 Citação obrigatória: `(ID xxxxxxx, fls. yyy)` SÓ se o ID existir no dossiê/autos.
-ID do PJe é tipicamente a string alfanumérica de 7 caracteres ao final da linha de assinatura eletrônica do PJe.
+ID do PJe é a string alfanumérica de 7 caracteres no fim da linha de assinatura eletrônica. Esse ID aparece só na última página da peça; as páginas anteriores pertencem ao mesmo ID.
 Se o ID não constar do material fornecido, cite apenas as folhas — NUNCA escreva "ID não informado".
 
 NUNCA use metalinguagem na minuta (não diga "vou analisar", "conforme consta", "não há dossiê", etc.).
@@ -200,6 +200,7 @@ Se não existir, RECUSAR trecho e avisar.
             Sugestão de novo prompt
         """
         import requests
+        from log_execucao import API, etapa
         from xai_reasoning import aplicar_reasoning_effort
         
         prompt_atual = self.obter_prompt()
@@ -247,15 +248,25 @@ Retorne APENAS o novo prompt, sem explicações adicionais."""
         aplicar_reasoning_effort(payload, modelo, reasoning_effort)
         
         try:
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=120
-            )
-            response.raise_for_status()
-            
-            resultado = response.json()
+            with etapa(
+                "kernel.sugestao_prompt.chat_completions",
+                categoria=API,
+                modelo=modelo,
+                reasoning=payload.get("reasoning_effort"),
+                chars_prompt=len(prompt_melhoria),
+                timeout_s=120,
+            ) as reg:
+                response = requests.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=120
+                )
+                reg.registrar_http(response)
+                response.raise_for_status()
+                
+                resultado = response.json()
+                reg.registrar_uso(resultado)
             sugestao = resultado["choices"][0]["message"]["content"]
             return sugestao
             

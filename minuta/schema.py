@@ -89,6 +89,10 @@ class MinutaCompleta(BaseModel):
     minutas_definitivas: List[MinutaDefinitiva] = Field(default_factory=list, description="Minutas definitivas")
     
     minuta_final_md: Optional[str] = Field(None, description="Minuta final em Markdown")
+    concluida: bool = Field(
+        True,
+        description="False enquanto a geração está em andamento (gravação parcial)",
+    )
     
     criterios_busca: Dict[str, Any] = Field(
         default_factory=dict,

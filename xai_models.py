@@ -107,16 +107,20 @@ def buscar_modelos_reasoning_xai(
         return None
 
     try:
-        response = requests.get(
-            f"{API_BASE}/models",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Accept": "application/json",
-            },
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        data = response.json()
+        from log_execucao import API, etapa
+
+        with etapa("xai.listar_modelos", categoria=API, timeout_s=timeout) as reg:
+            response = requests.get(
+                f"{API_BASE}/models",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Accept": "application/json",
+                },
+                timeout=timeout,
+            )
+            reg.registrar_http(response)
+            response.raise_for_status()
+            data = response.json()
         vistos = set()
         modelos: List[ModeloXai] = []
         for item in data.get("data", []):

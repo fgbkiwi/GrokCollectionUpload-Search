@@ -23,6 +23,7 @@ from .schema import (
     MinutaCompleta,
     Precedente,
 )
+from log_execucao import API, etapa
 from .kernel_sarah import KernelSarah
 from .busca_precedentes import BuscaPrecedentes
 from .modelos_tematicos import BibliotecaModelos
@@ -98,6 +99,7 @@ class OrquestradorMinuta:
                 prompt_estrutura,
                 json_mode=True,
                 reasoning_effort=reasoning_estrutura,
+                nome_etapa="minuta.estrutura.chat_completions",
             )
             
             dados = json.loads(resposta)
@@ -155,6 +157,53 @@ class OrquestradorMinuta:
         cartao: CartaoDoCaso,
         dossie: DossieProva
     ) -> tuple[MinutaTopico, List[str]]:
+        """Gera minuta prévia para um tópico (com registro no log de execução)."""
+        with etapa("minuta.previa", **self._contexto_topico(topico)) as reg:
+            minuta, avisos = self._gerar_minuta_previa(topico, cartao, dossie)
+            self._marcar_erro_por_avisos(reg, avisos)
+            return minuta, avisos
+
+    def gerar_minuta_definitiva(
+        self,
+        topico: TopicoEstrutura,
+        minuta_previa: Optional[MinutaTopico],
+        cartao: CartaoDoCaso,
+        dossie: DossieProva,
+        criterios_busca: Optional[Dict[str, Any]] = None
+    ) -> tuple[MinutaDefinitiva, List[str]]:
+        """Gera minuta definitiva (a prévia é opcional) com registro no log de execução."""
+        with etapa("minuta.definitiva", **self._contexto_topico(topico)) as reg:
+            minuta, avisos = self._gerar_minuta_definitiva(
+                topico, minuta_previa, cartao, dossie, criterios_busca
+            )
+            reg.atualizar(
+                chars_resposta=len(minuta.conteudo or ""),
+                precedentes=len(minuta.precedentes_citados or []),
+            )
+            self._marcar_erro_por_avisos(reg, avisos)
+            return minuta, avisos
+
+    @staticmethod
+    def _contexto_topico(topico: TopicoEstrutura) -> Dict[str, Any]:
+        return {
+            "topico_id": topico.id,
+            "topico": topico.titulo,
+            "tipo": getattr(topico.tipo, "value", topico.tipo),
+            "questao_id": topico.questao_id,
+        }
+
+    @staticmethod
+    def _marcar_erro_por_avisos(reg: Any, avisos: List[str]) -> None:
+        erros = [a for a in avisos if a.startswith("Erro ao gerar")]
+        if erros:
+            reg.marcar_erro("; ".join(erros))
+
+    def _gerar_minuta_previa(
+        self,
+        topico: TopicoEstrutura,
+        cartao: CartaoDoCaso,
+        dossie: DossieProva
+    ) -> tuple[MinutaTopico, List[str]]:
         """
         Gera minuta prévia para um tópico.
         
@@ -187,7 +236,10 @@ class OrquestradorMinuta:
             resposta = self._chamar_api(
                 prompt_sistema,
                 prompt_previa,
-                json_mode=True
+                json_mode=True,
+                reasoning_effort=self._limitar_reasoning_estrutura(self.reasoning_effort),
+                nome_etapa="minuta.previa.chat_completions",
+                contexto_log={"topico_id": topico.id},
             )
             
             dados = json.loads(resposta)
@@ -209,10 +261,10 @@ class OrquestradorMinuta:
                 conclusao_preliminar=""
             ), avisos
     
-    def gerar_minuta_definitiva(
+    def _gerar_minuta_definitiva(
         self,
         topico: TopicoEstrutura,
-        minuta_previa: MinutaTopico,
+        minuta_previa: Optional[MinutaTopico],
         cartao: CartaoDoCaso,
         dossie: DossieProva,
         criterios_busca: Optional[Dict[str, Any]] = None
@@ -272,7 +324,9 @@ class OrquestradorMinuta:
             resposta = self._chamar_api(
                 prompt_sistema,
                 prompt_definitiva,
-                json_mode=False
+                json_mode=False,
+                nome_etapa="minuta.definitiva.chat_completions",
+                contexto_log={"topico_id": topico.id},
             )
             
             ids_citados = self._extrair_ids_citados(resposta)
@@ -321,6 +375,8 @@ class OrquestradorMinuta:
         reasoning_effort: Optional[str] = None,
         timeout: Optional[float] = None,
         tentativas: int = 2,
+        nome_etapa: str = "minuta.chat_completions",
+        contexto_log: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Chama a API xAI (com timeout por reasoning e 1 retry em timeout)."""
         import requests
@@ -354,14 +410,27 @@ class OrquestradorMinuta:
         ultimo_erro: Optional[Exception] = None
         for tentativa in range(1, max(1, tentativas) + 1):
             try:
-                response = requests.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout_s,
-                )
-                response.raise_for_status()
-                resultado = response.json()
+                with etapa(
+                    nome_etapa,
+                    categoria=API,
+                    modelo=self.modelo,
+                    reasoning=payload.get("reasoning_effort"),
+                    json_mode=json_mode,
+                    chars_prompt=len(prompt_sistema) + len(prompt_usuario),
+                    timeout_s=timeout_s,
+                    tentativa=f"{tentativa}/{tentativas}",
+                    **(contexto_log or {}),
+                ) as reg:
+                    response = requests.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout_s,
+                    )
+                    reg.registrar_http(response)
+                    response.raise_for_status()
+                    resultado = response.json()
+                    reg.registrar_uso(resultado)
                 conteudo = self._extrair_texto_resposta(resultado)
                 if json_mode:
                     conteudo = self._limpar_cerca_json(conteudo)
@@ -394,7 +463,7 @@ class OrquestradorMinuta:
 
     @staticmethod
     def _limitar_reasoning_estrutura(effort: Optional[str]) -> Optional[str]:
-        """Estrutura JSON: no máximo medium (evita timeout com high/xhigh)."""
+        """Estrutura e prévia (JSON de planejamento): no máximo medium."""
         nivel = (effort or "").strip().lower()
         if not nivel:
             return "medium"
@@ -738,10 +807,22 @@ Retorne JSON válido."""
         
         return prompt
     
+    @staticmethod
+    def _bloco_previa(
+        minuta_previa: Optional[MinutaTopico], incluir_conclusao: bool = True
+    ) -> str:
+        """Orientação vinda da prévia; vazio quando a prévia não foi gerada."""
+        if minuta_previa is None or not (minuta_previa.abordagem or "").strip():
+            return ""
+        bloco = f"ABORDAGEM APROVADA:\n{minuta_previa.abordagem}\n\n"
+        if incluir_conclusao and (minuta_previa.conclusao_preliminar or "").strip():
+            bloco += f"CONCLUSÃO PRELIMINAR:\n{minuta_previa.conclusao_preliminar}\n\n"
+        return bloco
+    
     def _construir_prompt_definitiva(
         self,
         topico: TopicoEstrutura,
-        minuta_previa: MinutaTopico,
+        minuta_previa: Optional[MinutaTopico],
         cartao: CartaoDoCaso,
         dossie_questao: Optional[DossieQuestao],
         dossie: DossieProva,
@@ -752,10 +833,7 @@ Retorne JSON válido."""
         if topico.tipo == TipoTopico.RELATORIO:
             return f"""Redija APENAS o RELATÓRIO da sentença trabalhista em MARKDOWN.
 
-ABORDAGEM APROVADA:
-{minuta_previa.abordagem}
-
-{self._resumo_cartao_para_relatorio(cartao)}
+{self._bloco_previa(minuta_previa, incluir_conclusao=False)}{self._resumo_cartao_para_relatorio(cartao)}
 
 REGRAS:
 - Linguagem forense habitual de relatório judicial
@@ -773,13 +851,7 @@ REGRAS:
             )
             return f"""Redija APENAS o DISPOSITIVO final da sentença trabalhista em MARKDOWN.
 
-ABORDAGEM APROVADA:
-{minuta_previa.abordagem}
-
-CONCLUSÃO PRELIMINAR:
-{minuta_previa.conclusao_preliminar}
-
-QUESTÕES A ESPELHAR:
+{self._bloco_previa(minuta_previa)}QUESTÕES A ESPELHAR:
 {questoes}
 
 REGRAS:
@@ -792,13 +864,22 @@ REGRAS:
         
         prompt = f"""Redija a FUNDAMENTAÇÃO dialética do tópico: {topico.titulo}
 
-ABORDAGEM APROVADA:
-{minuta_previa.abordagem}
-
-CONCLUSÃO PRELIMINAR:
-{minuta_previa.conclusao_preliminar}
+{self._bloco_previa(minuta_previa)}"""
+        
+        if minuta_previa is None:
+            questao = next(
+                (q for q in cartao.questoes if q.id == topico.questao_id), None
+            )
+            if questao:
+                prompt += f"""QUESTÃO: {questao.titulo}
+Tipo: {questao.tipo}
+Momento: {questao.momento}
 
 """
+            prompt += (
+                "Antes de redigir, identifique a tese do autor, a antítese da defesa e a "
+                "prova determinante; a fundamentação deve enfrentá-las dialeticamente.\n\n"
+            )
         
         if dossie_questao:
             prompt += self._formatar_bloco_provas(dossie_questao)

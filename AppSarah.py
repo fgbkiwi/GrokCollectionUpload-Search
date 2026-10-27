@@ -43,6 +43,7 @@ class AppSarah:
         self.reasoning_dossie = "low"
         self.modelo_minuta = DEFAULT_MODEL
         self.reasoning_minuta = "high"
+        self.gerar_previa_minuta = False
         self.selected_collection_id = ""
         self._config_path = Path(__file__).resolve().parent / "app_config.json"
         self._carregar_config_persistida()
@@ -67,6 +68,7 @@ class AppSarah:
             self.modelo_grok = data.get("model") or self.modelo_grok
             self.reasoning_effort = data.get("reasoning_effort") or self.reasoning_effort
             self.selected_collection_id = data.get("selected_collection_id") or ""
+            self.gerar_previa_minuta = bool(data.get("gerar_previa_minuta", False))
 
             # Migração: se só houver chaves legadas, copiar para as três fases
             tem_por_fase = any(
@@ -122,6 +124,7 @@ class AppSarah:
         for fase, (attr_m, attr_r, default_r) in FASES.items():
             data[f"model_{fase}"] = getattr(self, attr_m, None) or DEFAULT_MODEL
             data[f"reasoning_{fase}"] = getattr(self, attr_r, None) or default_r
+        data["gerar_previa_minuta"] = bool(self.gerar_previa_minuta)
         if self.selected_collection_id:
             data["selected_collection_id"] = self.selected_collection_id
         self._config_path.write_text(

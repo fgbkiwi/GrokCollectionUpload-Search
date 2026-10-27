@@ -15,6 +15,7 @@ from cartao_caso import (
     Pedido,
     Questao,
 )
+from log_execucao import FASE, etapa
 from ui_modelo_reasoning import SeletorModeloReasoning
 from xai_models import DEFAULT_MODEL
 
@@ -153,29 +154,40 @@ class AbaCartao:
         self.abas_resultado.visible = False
         self.app.page.update()
 
-        try:
-            self.extrator = ExtratorCartao(
-                api_key=self.app.api_key,
-                model=getattr(self.app, "modelo_cartao", None) or DEFAULT_MODEL,
-                reasoning_effort=getattr(self.app, "reasoning_cartao", None),
-            )
+        modelo = getattr(self.app, "modelo_cartao", None) or DEFAULT_MODEL
+        reasoning = getattr(self.app, "reasoning_cartao", None)
+        with etapa(
+            "cartao",
+            categoria=FASE,
+            arquivo=self.caminho_arquivo.name,
+            modelo=modelo,
+            reasoning=reasoning,
+        ) as fase:
+            try:
+                self.extrator = ExtratorCartao(
+                    api_key=self.app.api_key,
+                    model=modelo,
+                    reasoning_effort=reasoning,
+                )
 
-            self.cartao_atual = self.extrator.extrair_de_arquivo(
-                self.caminho_arquivo,
-                progresso_callback=lambda msg: self._atualizar_progresso(msg, None),
-            )
+                self.cartao_atual = self.extrator.extrair_de_arquivo(
+                    self.caminho_arquivo,
+                    progresso_callback=lambda msg: self._atualizar_progresso(msg, None),
+                )
 
-            self._exibir_cartao()
-            self.btn_confirmar.disabled = False
-            self.texto_status.value = "Extração concluída! Revise as abas e confirme."
+                with etapa("cartao.exibicao_ui"):
+                    self._exibir_cartao()
+                self.btn_confirmar.disabled = False
+                self.texto_status.value = "Extração concluída! Revise as abas e confirme."
 
-        except Exception as ex:
-            self.app.mostrar_erro(f"Erro na extração: {str(ex)}")
-            self.texto_status.value = f"Erro: {str(ex)}"
-        finally:
-            self.progresso.visible = False
-            self.btn_extrair.disabled = False
-            self.app.page.update()
+            except Exception as ex:
+                fase.marcar_erro(str(ex))
+                self.app.mostrar_erro(f"Erro na extração: {str(ex)}")
+                self.texto_status.value = f"Erro: {str(ex)}"
+            finally:
+                self.progresso.visible = False
+                self.btn_extrair.disabled = False
+                self.app.page.update()
 
     def _atualizar_progresso(self, mensagem: str, progresso: float | None = None):
         """Atualiza barra de progresso."""
